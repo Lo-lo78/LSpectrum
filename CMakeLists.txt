@@ -9,7 +9,6 @@ set(JUCE_BUILD_EXTRAS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.git GIT_TAG 8.0.15 GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(JUCE)
 juce_add_plugin(LSpectrum COMPANY_NAME "Lo-lo" BUNDLE_ID "org.lolo.lspectrum" PLUGIN_MANUFACTURER_CODE LoLo PLUGIN_CODE Ls45 FORMATS VST3 PRODUCT_NAME "LSpectrum 4.5dB Analyzer" DESCRIPTION "Accessible 32 band spectrum analyzer" IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE IS_MIDI_EFFECT FALSE EDITOR_WANTS_KEYBOARD_FOCUS TRUE COPY_PLUGIN_AFTER_BUILD FALSE)
-# JUCE 8 CMake projects do not generate JuceHeader.h by default.
 juce_generate_juce_header(LSpectrum)
 target_sources(LSpectrum PRIVATE Source/PluginProcessor.h Source/PluginProcessor.cpp Source/PluginEditor.h Source/PluginEditor.cpp Source/ScreenReaderAnnouncer.h Source/ScreenReaderAnnouncer.cpp)
 target_compile_features(LSpectrum PRIVATE cxx_std_20)

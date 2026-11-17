@@ -1,0 +1,15 @@
+LSpectrum 4.5dB Analyzer VST3 — TEST3, guida NVDA
+
+1. Apri il plugin in REAPER e avvia la riproduzione.
+2. Premi R. L'analizzatore campiona l'ingresso stereo per 10 secondi (o il tempo salvato con D).
+   Se non riceve audio, annuncia l'attesa e non produce risultati inventati.
+3. Al termine premi le frecce per spostarti su bande e colonne L/R; 1-4 legge la colonna.
+4. B entra in selezione bande, X tiene solo la corrente, Spazio aggiunge/rimuove, B ritorna.
+5. S attiva il passabanda stereo; Invio la sinusoide; N il rumore 4,5 dB.
+6. Ctrl+C copia il report con L/R. O apre l'ultimo report testuale.
+7. Esc esce dalla finestra flottante del plugin (senza rimuovere il VST). Se usi un editor dockato, la chiusura viene demandata a REAPER.
+
+IMPORTANTE: non c'è un comando Play/Stop della DAW. R misura il segnale che entra nel VST3.
+I valori dB sono differenze dalla curva di riferimento 4,5 dB/ottava, NON dBFS.
+
+Dati: %APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer
