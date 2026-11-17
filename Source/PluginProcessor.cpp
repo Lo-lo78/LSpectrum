@@ -115,6 +115,10 @@ void LSpectrumProcessor::prepareToPlay(double sr, int maxBlockSize)
     lastSoloFrequency = -1.f;
     lastSoloEnabled = false;
     soloMix = 0.f;
+    soloGainSmoother.reset(sampleRateHz.load(), .020); // 20 ms gain smoothing.
+    const float initialDb = getSoloGainDb();
+    soloGainSmoother.setCurrentAndTargetValue(
+        initialDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, initialDb / 20.f));
 }
 void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
 {
@@ -131,6 +135,9 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     const float nGain = nDb <= -120.f ? 0.f : std::pow(10.f, nDb / 20.f);
     const double rate = juce::jmax(1.0, sampleRateHz.load());
     const bool solo = soloEnabled.load(std::memory_order_relaxed);
+    const float gainDb = soloGainDb.load(std::memory_order_relaxed);
+    const float gainTarget = gainDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, gainDb / 20.f);
+    soloGainSmoother.setTargetValue(gainTarget); // No allocations or locks on audio thread.
     const float requestedFrequency = soloFrequency.load(std::memory_order_relaxed);
     // Only recompute the band on a changed GUI selection. Filter coefficient
     // generation is NOT performed here: just switch precomputed band tables.
@@ -193,6 +200,8 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
             else overflow = true;
         }
 
+        // Advance the gain ramp even when solo is off, without touching the dry path.
+        const float soloGain = soloGainSmoother.getNextValue();
         // The listening features modify output only when deliberately enabled.
         if (solo) soloMix = juce::jmin(1.f, soloMix + soloStep);
         else      soloMix = juce::jmax(0.f, soloMix - soloStep);
@@ -209,8 +218,10 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
                 bandR = oldR + (bandR - oldR) * soloBandBlend;
                 soloBandBlend = juce::jmin(1.f, soloBandBlend + bandStep);
             }
-            left[i]  = auditionL + (static_cast<float>(bandL) - auditionL) * soloMix;
-            right[i] = auditionR + (static_cast<float>(bandR) - auditionR) * soloMix;
+            // Audition-only gain AFTER the band crossfade, BEFORE the dry/wet solo mix.
+            // The original signal is bit-identical with solo off and noise off.
+            left[i]  = auditionL + (static_cast<float>(bandL) * soloGain - auditionL) * soloMix;
+            right[i] = auditionR + (static_cast<float>(bandR) * soloGain - auditionR) * soloMix;
         }
         else
         {
@@ -286,6 +297,13 @@ int LSpectrumProcessor::getSelectedCount() const
 void LSpectrumProcessor::setNoiseLevel(float db)
 {
     noiseDb.store(juce::jlimit(-120.f,0.f,db)); saveSettings();
+}
+void LSpectrumProcessor::setSoloGainDb(float db)
+{
+    // Called only from GUI or state restoration, never the audio callback.
+    soloGainDb.store(juce::jlimit(soloGainMinimumDb, soloGainMaximumDb, db),
+                     std::memory_order_relaxed);
+    saveSettings();
 }
 void LSpectrumProcessor::rememberEditorPosition(int band, int column, bool selecting) noexcept
 {
@@ -471,6 +489,7 @@ void LSpectrumProcessor::saveSettings() const
     juce::XmlElement root("LSpectrumSettings");
     root.setAttribute("Duration",duration.load());
     root.setAttribute("NoiseDb",(double)noiseDb.load());
+    root.setAttribute("SoloGainDb", (double) getSoloGainDb());
     for(int b=0;b<bands;++b) root.setAttribute("Band"+juce::String(b+1),selected[(size_t)b].load());
     root.writeTo(dir.getChildFile("settings.xml"));
 }
@@ -483,6 +502,8 @@ void LSpectrumProcessor::loadSettings()
     editorColumn.store(juce::jlimit(0,3,xml->getIntAttribute("EditorColumn",0)));
     editorSelectionMode.store(xml->getBoolAttribute("EditorSelectionMode", false));
     noiseDb.store((float)xml->getDoubleAttribute("NoiseDb",-120.));
+    soloGainDb.store(juce::jlimit(soloGainMinimumDb, soloGainMaximumDb,
+                      (float)xml->getDoubleAttribute("SoloGainDb",0.)));
     for(int b=0;b<bands;++b) selected[(size_t)b].store(xml->getBoolAttribute("Band"+juce::String(b+1),true));
     if(getSelectedCount()==0) for(auto& s:selected) s.store(true);
 }
@@ -513,6 +534,7 @@ void LSpectrumProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("EditorColumn", editorColumn.load());
     xml.setAttribute("EditorSelectionMode", editorSelectionMode.load());
     xml.setAttribute("NoiseDb",(double)noiseDb.load());
+    xml.setAttribute("SoloGainDb",(double)getSoloGainDb());
     xml.setAttribute("SoloOn",soloEnabled.load());
     xml.setAttribute("SoloFreq",(double)soloFrequency.load());
     xml.setAttribute("HasResult",resultReady.load());
@@ -534,6 +556,8 @@ void LSpectrumProcessor::setStateInformation(const void* data,int size)
     editorColumn.store(juce::jlimit(0,3,xml->getIntAttribute("EditorColumn",0)));
     editorSelectionMode.store(xml->getBoolAttribute("EditorSelectionMode", false));
     noiseDb.store((float)xml->getDoubleAttribute("NoiseDb",-120.));
+    soloGainDb.store(juce::jlimit(soloGainMinimumDb, soloGainMaximumDb,
+                      (float)xml->getDoubleAttribute("SoloGainDb",0.)));
     // Legacy TEST5 ToneOn/ToneDb/ToneFreq fields are intentionally ignored.
     // This version does not generate a sine wave, even in saved projects.
     soloEnabled.store(xml->getBoolAttribute("SoloOn",false));

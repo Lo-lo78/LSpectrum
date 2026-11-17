@@ -66,6 +66,11 @@ public:
     void setSolo(bool enabled) { soloEnabled.store(enabled); }
     bool isSoloOn() const { return soloEnabled.load(); }
     void setSoloFrequency(float f) { soloFrequency.store(f); }
+    // Level of the audition bandpass ONLY, not the main input or FFT.
+    static constexpr float soloGainMinimumDb = -120.f;
+    static constexpr float soloGainMaximumDb = 24.f;
+    void setSoloGainDb(float db);
+    float getSoloGainDb() const { return soloGainDb.load(std::memory_order_relaxed); }
 
     static double frequency(int b);
     juce::File dataDirectory() const;
@@ -103,6 +108,8 @@ private:
     std::atomic<float> noiseDb {-120.f};
     std::atomic<float> soloFrequency {440.f};
     std::atomic<bool> soloEnabled {false};
+    std::atomic<float> soloGainDb {0.f}; // Default 0 dB, range -120 to +24 dB.
+    juce::SmoothedValue<float, juce::ValueSmoothingTypes::Linear> soloGainSmoother;
     NoiseState noiseL, noiseR;
     // 36 dB/oct on EACH flank: 6th-order Butterworth high-pass +
     // 6th-order Butterworth low-pass (3 biquads for each edge).

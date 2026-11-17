@@ -9,29 +9,29 @@
 
 namespace lspectrum
 {
-void announceToActiveScreenReader (juce::Component& source, const juce::String& message, bool preserveOrder)
+bool announceToActiveScreenReader (juce::Component& source, const juce::String& message, bool preserveOrder)
 {
 
    #if JUCE_WINDOWS
     if (! UiaClientsAreListening())
-        return;
+        return false;
 
     auto* handler = source.getAccessibilityHandler();
     if (handler == nullptr)
-        return;
+        return false;
 
     auto* unknown = reinterpret_cast<IUnknown*> (handler->getNativeImplementation());
     if (unknown == nullptr)
-        return;
+        return false;
 
     IRawElementProviderSimple* provider = nullptr;
     if (FAILED (unknown->QueryInterface (__uuidof (IRawElementProviderSimple),
                                          reinterpret_cast<void**> (&provider))))
-        return;
+        return false;
 
     auto* text = SysAllocString (message.toWideCharPointer());
     auto* activity = SysAllocString (L"LSpectrum");
-    UiaRaiseNotificationEvent (provider,
+    const auto hr = UiaRaiseNotificationEvent (provider,
                                NotificationKind_Other,
                                preserveOrder ? NotificationProcessing_ImportantAll
                                              : NotificationProcessing_ImportantMostRecent,
@@ -40,9 +40,14 @@ void announceToActiveScreenReader (juce::Component& source, const juce::String& 
     SysFreeString (text);
     SysFreeString (activity);
     provider->Release();
+    return SUCCEEDED (hr);
    #else
     if (auto* handler = source.getAccessibilityHandler())
+    {
         handler->notifyAccessibilityEvent (juce::AccessibilityEvent::titleChanged);
+        return true;
+    }
+    return false;
    #endif
 }
 }

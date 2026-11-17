@@ -1,4 +1,4 @@
-LSpectrum 4.5dB Analyzer - TEST7
+LSpectrum 4.5dB Analyzer - TEST8
 
 INGRESSO: nessun annuncio introduttivo. All'apertura NVDA deve pronunciare solo la cella corrente.
 
@@ -22,3 +22,6 @@ Esc = chiude la finestra FX in base al contenitore REAPER
 Il solo passa esclusivamente il segnale reale contenuto nella banda scelta.
 Quando il solo e il noise sono spenti, il plugin lascia passare l'audio inalterato.
 Il filtro è composto da HP 6° ordine e LP 6° ordine per canale; non è un brickwall.
+
+Ctrl+Freccia su/giu: Guadagno ascolto passabanda da -120 a +24 dB, passo 1 dB. Default 0 dB. Non cambia l'analisi o il segnale normale.
+All'apertura NVDA annuncia soltanto la cella corrente, dopo la disponibilita del focus/UI Automation.

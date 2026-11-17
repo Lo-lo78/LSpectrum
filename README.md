@@ -1,23 +1,24 @@
-# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST7
+# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST8
 
 **Repository:** https://github.com/Lo-lo78/LSpectrum
 
 VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separato, 32 bande logaritmiche, riferimento 4,5 dB per ottava, analisi separata L/R, generatore di rumore e ascolto della banda in solo. L'audio in ingresso attraversa il plugin senza alterazioni quando noise e solo sono disattivati.
 
-## Modifiche TEST7
+## Modifiche TEST8
 
-1. **Ingresso pulito con NVDA:** eliminate completamente le due frasi introduttive `Previous result available...` e `Arrows: table...`. La guida a video non viene più creata. L'etichetta di progresso è vuota all'apertura e viene esclusa dall'albero di accessibilità con `setAccessible(false)`; serve solo come indicatore visivo dopo l'avvio di un'analisi. NVDA annuncia soltanto la cella corrente dopo l'apertura, come nella TEST6. Restano i nomi nativi dei pulsanti, quando vengono raggiunti.
-2. **Passabanda molto più selettivo:** il precedente filtro `StateVariableTPTFilter` con risonanza 4 è stato sostituito da due filtri Butterworth di **sesto ordine** in cascata: passa-alto 36 dB/ottava e passa-basso 36 dB/ottava, per ogni canale. Sono sei biquad per canale, tre passa-alto e tre passa-basso. Se il rumore di riferimento è attivo, anche questo viene filtrato durante il solo: nessun rumore non filtrato è sommato a valle. I tagli inferiore/superiore coincidono con i confini delle 32 bande dell'analizzatore, non con una larghezza Q arbitraria.
-3. **Cambio di banda senza scatti:** due banchi di filtri già allocati e un crossfade di circa 25 ms tra bande. Attivazione/disattivazione del solo con transizione di circa 10 ms. Nessuna allocazione, mutex o generazione di coefficienti nel thread audio.
-4. **Bande sopra Nyquist:** se il centro della banda scelta è fuori dall'intervallo riproducibile alla frequenza di campionamento corrente, il solo emette silenzio anziché far ascoltare una banda inferiore non richiesta.
+- **Guadagno dell'ascolto passabanda:** Ctrl+Freccia su/giù modifica di 1 dB il livello del solo fra **-120 e +24 dB** (default 0 dB); rampa di 20 ms, nessun effetto sull'audio normale o sui dati FFT. Valore salvato in `settings.xml` e nello stato di ogni istanza REAPER, compatibile con i progetti TEST7 precedenti.
+- **Primo ingresso NVDA:** il componente editor espone come nome e titolo accessibile la **cella corrente** invece del titolo ripetitivo. L'annuncio avviene quando finestra, focus e provider UI Automation sono realmente pronti, con ritentativi silenziosi se il provider non è ancora disponibile. Nessuna frase introduttiva. Il nome del prodotto VST3 rimane invariato per REAPER. REAPER può comunque annunciare il proprio titolo FX Chain: il plugin controlla soltanto il nome accessibile del proprio editor.
+- **Visivo:** al posto del titolo statico viene mostrata la cella corrente, e sotto il guadagno del passabanda.
+- **DSP confermato:** passabanda di sesto ordine su ciascun lato (36 dB/ottava), stereo, crossfade tra bande di 25 ms, noise, FFT su thread separato, comandi e tabella invariati.
 
-Il nuovo passabanda non è un filtro ideale a pareti verticali: a 36 dB/ottava le frequenze esterne vengono attenuate gradualmente, non cancellate istantaneamente. L'ascolto isolato introduce fisiologicamente rotazioni di fase, ma non le applica al segnale normale quando il solo è spento.
+**Attenzione ai picchi:** +24 dB equivale a un guadagno di circa 15,85 volte in ampiezza. Senza limiter si può arrivare al clipping nelle tracce seguenti.
 
 ## Comandi
 
 | Tasto | Funzione |
 | --- | --- |
 | Frecce, Home, End, Pagina su/giù | Naviga la tabella a quattro colonne |
+| Ctrl+Freccia su / Ctrl+Freccia giù | Guadagno ascolto passabanda +1 / -1 dB (da -120 a +24 dB) |
 | Spazio | REAPER Play/Stop |
 | Ctrl+Spazio | REAPER Play/Pausa |
 | R | Nuova analisi stereo |
@@ -41,7 +42,7 @@ Il nuovo passabanda non è un filtro ideale a pareti verticali: a 36 dB/ottava l
 Copiare tutti i file **direttamente nella radice del repository locale**, sovrascrivendo quelli precedenti ma senza eliminare `.git`. Include `.github/workflows/build-windows.yml` per Windows 2022 e JUCE 8.0.15.
 
 ```cmd
-git add . && git commit -m "LSpectrum TEST7 clean NVDA entry and 36dB bandpass" && git push
+git add . && git commit -m "LSpectrum TEST8 audition gain and first-focus NVDA" && git push
 ```
 
 **Stato:** sorgenti controllati staticamente, con verifica numerica indipendente delle pendenze. La compilazione Windows e il collaudo in REAPER/NVDA restano da effettuare su GitHub Actions.

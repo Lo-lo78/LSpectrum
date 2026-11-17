@@ -11,6 +11,7 @@ public:
     void mouseDown(const juce::MouseEvent&) override;
     bool keyPressed(const juce::KeyPress&) override;
     void visibilityChanged() override;
+    void focusGained(FocusChangeType) override;
 private:
     bool keyPressed(const juce::KeyPress&, juce::Component*) override;
     bool handleKeyPress(const juce::KeyPress&);
@@ -54,6 +55,9 @@ private:
     bool lastResultStatus=false;
     bool waitingAnnounced=false, captureBegan=false, errorAnnounced=false;
     bool initialLocationAnnounced=false;
+    bool initialLocationPending=true;
+    bool initialFocusRetryDone=false;
+    juce::uint32 initialFocusRequestedMs=0;
     juce::uint32 scanRequestedMs=0;
     uint64_t previousCaptured=0;
     float previousNoise=-60.f;

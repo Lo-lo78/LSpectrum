@@ -4,5 +4,5 @@
 
 namespace lspectrum
 {
-void announceToActiveScreenReader (juce::Component&, const juce::String&, bool preserveOrder = false);
+bool announceToActiveScreenReader (juce::Component&, const juce::String&, bool preserveOrder = false);
 }

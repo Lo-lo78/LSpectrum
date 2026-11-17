@@ -83,7 +83,11 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
             }
         row = nearestRow;
     }
+    // The plugin's product name stays unchanged for the host, but the editor
+    // itself exposes the CURRENT CELL, not "LSpectrum 4.5dB Analyzer".
+    setName(cellText());
     setTitle(cellText());
+    initialFocusRequestedMs = juce::Time::getMillisecondCounter();
     // No introductory text for NVDA/REAPER when landing in the FX chain.
     // Progress status is drawn for sighted users, but is not part of the
     // accessibility tree; only the current table cell is announced on entry.
@@ -144,23 +148,28 @@ void LSpectrumEditor::visibilityChanged()
 {
     if (isShowing())
     {
+        // Do not queue a one-shot announcement before UI Automation is ready:
+        // on the FIRST editor opening the provider may not yet exist.
+        setName(cellText());
         setTitle(cellText());
+        initialLocationAnnounced = false;
+        initialLocationPending = true;
+        initialFocusRetryDone = false;
+        initialFocusRequestedMs = juce::Time::getMillisecondCounter();
         grabKeyboardFocus();
-        if (!initialLocationAnnounced)
-        {
-            initialLocationAnnounced = true;
-            auto safe = juce::Component::SafePointer<LSpectrumEditor>(this);
-            juce::Timer::callAfterDelay(120, [safe]
-            {
-                if (safe && safe->isShowing()) safe->announceCell();
-            });
-        }
     }
     else
     {
-        // Some REAPER window layouts hide/re-show the same editor instance.
-        // Announce the retained cell again the next time it becomes visible.
+        initialLocationPending = false;
         initialLocationAnnounced = false;
+    }
+}
+void LSpectrumEditor::focusGained(FocusChangeType)
+{
+    if (isShowing() && !initialLocationAnnounced)
+    {
+        initialLocationPending = true;
+        initialFocusRequestedMs = juce::Time::getMillisecondCounter();
     }
 }
 void LSpectrumEditor::paint(juce::Graphics& graphics)
@@ -168,10 +177,13 @@ void LSpectrumEditor::paint(juce::Graphics& graphics)
     graphics.fillAll(juce::Colour(0xff121820));
     graphics.setColour(juce::Colours::white);
     graphics.setFont(juce::FontOptions(22.f));
-    graphics.drawText("LSpectrum 4.5dB Analyzer",12,8,786,32,juce::Justification::centredLeft);
+    // No static product title in the editor: show the current location.
+    graphics.drawText(cellText(),12,8,786,32,juce::Justification::centredLeft);
     graphics.setFont(juce::FontOptions(14.f));
     graphics.setColour(juce::Colour(0xffc0cbd5));
-    graphics.drawText("32 log bands | 4.5 dB/oct reference | Stereo input/output",12,39,786,22,juce::Justification::centredLeft);
+    const float soloDb = processor.getSoloGainDb();
+    const juce::String soloLevel = juce::String(soloDb >= 0.f ? "+" : "") + juce::String(soloDb, 0);
+    graphics.drawText("32 bands | 4.5 dB/oct | Bandpass level " + soloLevel + " dB",12,39,786,22,juce::Justification::centredLeft);
     graphics.setColour(juce::Colour(0xff273645));
     graphics.fillRoundedRectangle(tableRect.toFloat(),3.f);
     const int widths[4]={80,185,245,260};
@@ -302,7 +314,16 @@ void LSpectrumEditor::rememberPosition()
 {
     processor.rememberEditorPosition(bandAtRow(), col, selectionMode);
 }
-void LSpectrumEditor::announceCell() {announce(cellText());}
+void LSpectrumEditor::announceCell()
+{
+    // Only mark the entry as complete after JUCE has exposed a valid Windows
+    // accessibility provider and the UIA notification has been accepted.
+    if (lspectrum::announceToActiveScreenReader(*this, cellText(), true))
+    {
+        initialLocationAnnounced = true;
+        initialLocationPending = false;
+    }
+}
 void LSpectrumEditor::navigate(int dRow,int dCol)
 {
     const int oldRow=row,oldCol=col;
@@ -349,7 +370,7 @@ void LSpectrumEditor::refreshScreen()
     selection.setButtonText(selectionMode?"Results (B)":"Bands (B)");
     solo.setButtonText(processor.isSoloOn()?"Solo ON (Enter)":"Solo band (Enter)");
     noise.setButtonText(processor.getNoiseLevel()<=-120.f?"Noise OFF (N)":"Noise ON (N)");
-    repaint(tableRect);
+    repaint(); // Also refresh the visible bandpass gain at the top.
 }
 void LSpectrumEditor::startAnalysis()
 {
@@ -409,6 +430,23 @@ void LSpectrumEditor::copy(const juce::String& text,const juce::String& result)
 }
 void LSpectrumEditor::timerCallback()
 {
+    // First-open/re-open NVDA entry: only try after JUCE's peer and keyboard
+    // focus are established, and retry silently if the native UIA provider
+    // has not been created yet. No introduction or help text is ever spoken.
+    if (initialLocationPending && isShowing() && getPeer() != nullptr)
+    {
+        const auto elapsed = juce::Time::getMillisecondCounter() - initialFocusRequestedMs;
+        // Try one delayed focus acquisition only if REAPER has not yet given
+        // keyboard focus to our editor. Never steal it from an input/button.
+        if (elapsed >= 200 && !initialFocusRetryDone)
+        {
+            initialFocusRetryDone = true;
+            if (!hasKeyboardFocus(true)) grabKeyboardFocus();
+        }
+        if (elapsed >= 250 && hasKeyboardFocus(true)
+            && !countdownInput.hasKeyboardFocus(true))
+            announceCell();
+    }
     const int state=processor.getScanState();
     if (processor.hasScanError())
     {
@@ -559,6 +597,20 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
         else announce("No result to copy");
         return true;
     }
+    // Dedicated bandpass audition gain; Ctrl+arrows must never move the cursor.
+    if (mods.isCtrlDown() && !mods.isAltDown() && !mods.isShiftDown()
+        && (k == juce::KeyPress::upKey || k == juce::KeyPress::downKey))
+    {
+        const float oldDb = processor.getSoloGainDb();
+        const float wanted = oldDb + (k == juce::KeyPress::upKey ? 1.f : -1.f);
+        const float newDb = juce::jlimit(LSpectrumProcessor::soloGainMinimumDb,
+                                        LSpectrumProcessor::soloGainMaximumDb, wanted);
+        if (newDb != oldDb) processor.setSoloGainDb(newDb);
+        announce("Bandpass level " + juce::String(newDb >= 0.f ? "+" : "")
+                 + juce::String(newDb, 0) + " dB");
+        refreshScreen();
+        return true;
+    }
     if(k==juce::KeyPress::upKey){navigate(-1,0);return true;}
     if(k==juce::KeyPress::downKey){navigate(1,0);return true;}
     if(k==juce::KeyPress::leftKey){navigate(0,-1);return true;}
@@ -604,7 +656,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     }
     if(k==juce::KeyPress::F1Key || k=='?')
     {
-        announce("Arrows navigate the four columns. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown edit. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
+        announce("Arrows navigate the four columns. Control Up and Down: bandpass level, minus 120 to plus 24 dB. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown edit. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
         return true;
     }
     if(k==juce::KeyPress::tabKey)
