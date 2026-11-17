@@ -1,5 +1,31 @@
 #pragma once
 #include "PluginProcessor.h"
+#include <functional>
+
+// Intercept countdown keys BEFORE JUCE TextEditor/Button dispatches them to
+// the host or to its normal keyboard-focus traverser.
+class LSpectrumCountdownEdit final : public juce::TextEditor
+{
+public:
+    std::function<bool(const juce::KeyPress&)> onCountdownKey;
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        if (onCountdownKey && onCountdownKey(key)) return true;
+        return juce::TextEditor::keyPressed(key);
+    }
+};
+
+class LSpectrumCountdownButton final : public juce::TextButton
+{
+public:
+    explicit LSpectrumCountdownButton(const juce::String& caption) : juce::TextButton(caption) {}
+    std::function<bool(const juce::KeyPress&)> onCountdownKey;
+    bool keyPressed(const juce::KeyPress& key) override
+    {
+        if (onCountdownKey && onCountdownKey(key)) return true;
+        return juce::TextButton::keyPressed(key);
+    }
+};
 
 class LSpectrumEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::KeyListener
 {
@@ -30,6 +56,10 @@ private:
     void startAnalysis();
     void changeDuration();
     void saveCountdown();
+    void cancelCountdown();
+    void finishCountdown();
+    bool countdownKeyPressed(const juce::KeyPress&, int control);
+    void moveCountdownFocus(int direction, int control);
     void toggleSolo();
     void toggleNoise();
     void copy(const juce::String&,const juce::String&);
@@ -43,8 +73,10 @@ private:
     juce::Label status;
     juce::TextButton analyze{"Analyze (R)"}, duration{"Countdown (C)"}, selection{"Bands (B)"};
     juce::TextButton solo{"Solo band (Enter)"}, noise{"Noise (N)"};
-    juce::TextEditor countdownInput;
-    juce::TextButton countdownSave{"Save"};
+    LSpectrumCountdownEdit countdownInput;
+    LSpectrumCountdownButton countdownOk{"OK"};
+    LSpectrumCountdownButton countdownCancel{"Cancel"};
+    bool countdownActive=false;
     juce::TextButton copyReport{"Copy report"}, openReport{"Open report"}, closeButton{"Close (Esc)"};
     juce::Rectangle<int> tableRect;
     int row=0,col=0;

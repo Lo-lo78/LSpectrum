@@ -1,9 +1,14 @@
-LSpectrum 4.5dB Analyzer - TEST8
+LSpectrum 4.5dB Analyzer - TEST11
 
 INGRESSO: nessun annuncio introduttivo. All'apertura NVDA deve pronunciare solo la cella corrente.
 
 R = analisi 10 secondi (modificabile)
-C = vai al campo countdown; Invio salva (1-600 secondi)
+C = apri countdown nel campo di testo (1-600 secondi)
+TAB nel countdown = campo countdown -> OK -> Cancel -> campo countdown (ciclo)
+MAIUSC+TAB nel countdown = ciclo inverso
+INVIO nel countdown o su OK = conferma e torna alla tabella
+INVIO su Cancel = annulla e torna alla tabella
+ESC nel countdown = annulla e torna alla tabella (non chiude il plugin)
 Frecce = tabella: banda, frequenza, dB sinistro, dB destro
 Invio (tabella) = passabanda in solo on/off, 36 dB/ottava su entrambi i fianchi
 B = modalità selezione bande
@@ -17,7 +22,7 @@ N = rumore on/off; +/- = livello rumore
 Ctrl+C = copia rapporto
 O o P = apri rapporto salvato
 F1 = guida vocale solo su richiesta
-Esc = chiude la finestra FX in base al contenitore REAPER
+Esc dalla tabella = chiude la finestra FX in base al contenitore REAPER
 
 Il solo passa esclusivamente il segnale reale contenuto nella banda scelta.
 Quando il solo e il noise sono spenti, il plugin lascia passare l'audio inalterato.
@@ -26,4 +31,6 @@ Il filtro è composto da HP 6° ordine e LP 6° ordine per canale; non è un bri
 Ctrl+Freccia su/giu: Guadagno ascolto passabanda da -120 a +24 dB, passo 1 dB. Default 0 dB. Non cambia l'analisi o il segnale normale.
 All'apertura NVDA annuncia soltanto la cella corrente, dopo la disponibilita del focus/UI Automation.
 
-TEST9: +3 dB di guadagno interno al passabanda (0 dB mostrati restano 0); NVDA annuncia esplicitamente la cella solo al primo caricamento dell’istanza, evitando il doppio messaggio al rientro.
+TEST10: rimosso il guadagno interno aggiuntivo di +3 dB; volume del passabanda identico alla TEST8. Conservata la correzione NVDA della TEST9 che elimina il doppio annuncio al rientro.
+
+TEST11: quando il focus è su OK o Cancel, le frecce sono consumate dal plugin e non escono nella FX Chain. Il ritorno dal countdown mantiene banda e colonna originali, senza un messaggio di banda aggiuntivo. Il DSP è invariato rispetto alla TEST10.

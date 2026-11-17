@@ -3,13 +3,7 @@
 #include <cmath>
 #include <algorithm>
 
-namespace
-{
-    constexpr double slope = 4.5, loHz = 20.0, hiHz = 20000.0;
-    // Fixed, internal audition makeup. User gain stays at 0 dB by default;
-    // the filtered solo signal alone gets +3 dB (not the dry audio or FFT).
-    constexpr float soloFixedMakeupDb = 3.0f;
-}
+namespace { constexpr double slope = 4.5, loHz = 20.0, hiHz = 20000.0; }
 
 float LSpectrumProcessor::NoiseState::next()
 {
@@ -124,7 +118,7 @@ void LSpectrumProcessor::prepareToPlay(double sr, int maxBlockSize)
     soloGainSmoother.reset(sampleRateHz.load(), .020); // 20 ms gain smoothing.
     const float initialDb = getSoloGainDb();
     soloGainSmoother.setCurrentAndTargetValue(
-        initialDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, (initialDb + soloFixedMakeupDb) / 20.f));
+        initialDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, initialDb / 20.f));
 }
 void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
 {
@@ -142,7 +136,7 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     const double rate = juce::jmax(1.0, sampleRateHz.load());
     const bool solo = soloEnabled.load(std::memory_order_relaxed);
     const float gainDb = soloGainDb.load(std::memory_order_relaxed);
-    const float gainTarget = gainDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, (gainDb + soloFixedMakeupDb) / 20.f);
+    const float gainTarget = gainDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, gainDb / 20.f);
     soloGainSmoother.setTargetValue(gainTarget); // No allocations or locks on audio thread.
     const float requestedFrequency = soloFrequency.load(std::memory_order_relaxed);
     // Only recompute the band on a changed GUI selection. Filter coefficient

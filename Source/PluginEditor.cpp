@@ -97,32 +97,46 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     status.setColour(juce::Label::textColourId, juce::Colours::white);
     status.setText({}, juce::dontSendNotification);
     lastResultStatus=p.hasResult();
-    for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&countdownSave,&copyReport,&openReport,&closeButton})
+    for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&copyReport,&openReport,&closeButton})
     {
         addAndMakeVisible(*button);
         button->setMouseClickGrabsKeyboardFocus(false);
         button->setWantsKeyboardFocus(false);
         button->addKeyListener(this);
     }
-    // Save is the only control in the top toolbar that must also be
-    // keyboard-reachable from the countdown edit with Tab.
-    countdownSave.setWantsKeyboardFocus(true);
     analyze.onClick=[this]{startAnalysis();grabKeyboardFocus();};
     duration.onClick=[this]{changeDuration();};
     selection.onClick=[this]{toggleSelectionMode();grabKeyboardFocus();};
     solo.onClick=[this]{toggleSolo();grabKeyboardFocus();};
     noise.onClick=[this]{toggleNoise();grabKeyboardFocus();};
-    // The countdown is edited directly in the VST window. No AlertWindow,
-    // duplicate Save announcements or focus transfer to a native modal.
-    addAndMakeVisible(countdownInput);
+    // Inline countdown: it is an independent, closed keyboard-focus group.
+    // The three controls appear only while editing, so the normal table
+    // keeps its own keyboard shortcuts, including Tab.
+    addChildComponent(countdownInput);
+    addChildComponent(countdownOk);
+    addChildComponent(countdownCancel);
     countdownInput.setName("countdown");
     countdownInput.setDescription({});
+    countdownInput.setWantsKeyboardFocus(true);
     countdownInput.setInputRestrictions(3, "0123456789");
+    countdownInput.setTabKeyUsedAsCharacter(false);
     countdownInput.setText(juce::String(processor.getDuration()), false);
-    countdownInput.addKeyListener(this);
-    countdownInput.onReturnKey=[this]{saveCountdown();};
-    countdownInput.onEscapeKey=[this]{requestClose();};
-    countdownSave.onClick=[this]{saveCountdown();};
+    countdownInput.onCountdownKey=[this](const juce::KeyPress& k)
+    {
+        return countdownKeyPressed(k, 0);
+    };
+    countdownOk.onCountdownKey=[this](const juce::KeyPress& k)
+    {
+        return countdownKeyPressed(k, 1);
+    };
+    countdownCancel.onCountdownKey=[this](const juce::KeyPress& k)
+    {
+        return countdownKeyPressed(k, 2);
+    };
+    countdownOk.setWantsKeyboardFocus(true);
+    countdownCancel.setWantsKeyboardFocus(true);
+    countdownOk.onClick=[this]{saveCountdown();};
+    countdownCancel.onClick=[this]{cancelCountdown();};
     copyReport.onClick=[this]
     {
         if(!processor.hasResult()) announce("No analysis results yet");
@@ -252,10 +266,11 @@ void LSpectrumEditor::resized()
     solo.setBounds(447,88,170,33);
     noise.setBounds(625,88,173,33);
     countdownInput.setBounds(12,128,92,31);
-    countdownSave.setBounds(110,128,100,31);
-    copyReport.setBounds(218,128,165,31);
-    openReport.setBounds(391,128,165,31);
-    closeButton.setBounds(564,128,160,31);
+    countdownOk.setBounds(110,128,100,31);
+    countdownCancel.setBounds(218,128,100,31);
+    copyReport.setBounds(326,128,145,31);
+    openReport.setBounds(479,128,145,31);
+    closeButton.setBounds(632,128,166,31);
     tableRect=juce::Rectangle<int>(12,169,786,headerHeight+LSpectrumProcessor::bands*lineHeight+2);
 }
 void LSpectrumEditor::mouseDown(const juce::MouseEvent& event)
@@ -393,14 +408,89 @@ void LSpectrumEditor::startAnalysis()
 }
 void LSpectrumEditor::changeDuration()
 {
-    // C focuses the existing inline edit control; NVDA speaks its own
-    // accessible name ("countdown") and value. No explicit announcements.
+    // C opens a local, non-modal countdown control group. Do not call
+    // announce(): let NVDA read the normal control name and value.
+    countdownActive = true;
+    initialLocationPending = false;  // never speak a table cell over countdown
     countdownInput.setText(juce::String(processor.getDuration()), false);
+    countdownInput.setVisible(true);
+    countdownOk.setVisible(true);
+    countdownCancel.setVisible(true);
     countdownInput.grabKeyboardFocus();
     countdownInput.selectAll();
 }
+
+void LSpectrumEditor::moveCountdownFocus(int direction, int control)
+{
+    // Tab / Shift+Tab have exactly three stops, wrapping in both directions.
+    const int next = (control + (direction > 0 ? 1 : 2)) % 3;
+    if (next == 0) countdownInput.grabKeyboardFocus();
+    else if (next == 1) countdownOk.grabKeyboardFocus();
+    else countdownCancel.grabKeyboardFocus();
+}
+
+bool LSpectrumEditor::countdownKeyPressed(const juce::KeyPress& key, int control)
+{
+    if (!countdownActive) return false;
+    const int k = key.getKeyCode();
+    if (k == juce::KeyPress::escapeKey)
+    {
+        cancelCountdown();
+        return true;
+    }
+    if (k == juce::KeyPress::tabKey)
+    {
+        moveCountdownFocus(key.getModifiers().isShiftDown() ? -1 : 1, control);
+        return true;
+    }
+    if (k == juce::KeyPress::returnKey)
+    {
+        if (control == 2) cancelCountdown();
+        else saveCountdown();
+        return true;
+    }
+    // The two buttons are not navigation targets for REAPER. Their arrow
+    // keys (and all other keys) must never escape the plugin/FX Chain.
+    if (control != 0)
+    {
+        if (k == ' ')
+        {
+            if (control == 1) saveCountdown();
+            else cancelCountdown();
+        }
+        return true;
+    }
+    // In the edit field arrows/Home/End work normally on the number.
+    return false;
+}
+
+void LSpectrumEditor::finishCountdown()
+{
+    // Restore the original band/column BEFORE returning the keyboard focus.
+    // No announceCell() here: native NVDA focus is the only announcement.
+    const auto location = cellText();
+    setName(location);
+    setTitle(location);
+    rememberPosition();
+    countdownActive = false;
+    grabKeyboardFocus();
+    countdownInput.setVisible(false);
+    countdownOk.setVisible(false);
+    countdownCancel.setVisible(false);
+    refreshScreen();
+}
+
+void LSpectrumEditor::cancelCountdown()
+{
+    if (!countdownActive) return;  // Ignore a delayed native Button callback.
+    // Esc / Cancel discard all typed changes.
+    countdownInput.setText(juce::String(processor.getDuration()), false);
+    finishCountdown();
+}
+
 void LSpectrumEditor::saveCountdown()
 {
+    if (!countdownActive) return;  // Prevent duplicate Button activation.
     const auto value=countdownInput.getText().trim();
     // Use a strict range check. The plugin's duration is always 1..600 s.
     const int n=value.getIntValue();
@@ -414,7 +504,7 @@ void LSpectrumEditor::saveCountdown()
     processor.setDuration(n);
     countdownInput.setText(juce::String(processor.getDuration()), false);
     status.setText("Countdown: " + juce::String(processor.getDuration()) + " seconds", juce::dontSendNotification);
-    grabKeyboardFocus();
+    finishCountdown();
 }
 void LSpectrumEditor::toggleSolo()
 {
@@ -441,7 +531,7 @@ void LSpectrumEditor::timerCallback()
     // First-open/re-open NVDA entry: only try after JUCE's peer and keyboard
     // focus are established, and retry silently if the native UIA provider
     // has not been created yet. No introduction or help text is ever spoken.
-    if (initialLocationPending && processor.needsFirstEditorCellAnnouncement()
+    if (!countdownActive && initialLocationPending && processor.needsFirstEditorCellAnnouncement()
         && isShowing() && getPeer() != nullptr)
     {
         const auto elapsed = juce::Time::getMillisecondCounter() - initialFocusRequestedMs;
@@ -578,10 +668,22 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
 {
     const int k=key.getKeyCode();
     const auto mods=key.getModifiers();
-    // Never treat arrows typed in the countdown field as table shortcuts.
-    // Escape is the ONLY key that closes the plugin, from every focus context.
+    // While C is active, no host/table hotkey is allowed through this editor.
+    // Normal countdown keys are handled by the input/button subclasses first.
+    if (countdownActive)
+    {
+        if (countdownInput.hasKeyboardFocus(true))
+            return countdownKeyPressed(key, 0);
+        if (countdownOk.hasKeyboardFocus(true))
+            return countdownKeyPressed(key, 1);
+        if (countdownCancel.hasKeyboardFocus(true))
+            return countdownKeyPressed(key, 2);
+        // Unexpected focus: bring the user back inside the countdown group.
+        countdownInput.grabKeyboardFocus();
+        return true;
+    }
+    // Esc closes the FX window only from the MAIN table, never from C.
     if(k==juce::KeyPress::escapeKey) {requestClose();return true;}
-    if(countdownInput.hasKeyboardFocus(true) || countdownSave.hasKeyboardFocus(true)) return false;
     // REAPER transport is handled by action IDs on the GUI thread, not by
     // sending synthetic keypresses or touching the audio callback.
     if (k==' ' && mods.isCtrlDown())
@@ -665,7 +767,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     }
     if(k==juce::KeyPress::F1Key || k=='?')
     {
-        announce("Arrows navigate the four columns. Control Up and Down: bandpass level, minus 120 to plus 24 dB. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown edit. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
+        announce("Arrows navigate the four columns. Control Up and Down: bandpass level, minus 120 to plus 24 dB. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown. Tab cycles edit, OK, Cancel; Shift Tab goes backward. Enter acts on the focused control, Escape cancels and returns to the table. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
         return true;
     }
     if(k==juce::KeyPress::tabKey)

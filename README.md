@@ -1,14 +1,24 @@
-# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST9
+# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST11
 
 **Repository:** https://github.com/Lo-lo78/LSpectrum
 
 VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separato, 32 bande logaritmiche, riferimento 4,5 dB per ottava, analisi separata L/R, generatore di rumore e ascolto della banda in solo. L'audio in ingresso attraversa il plugin senza alterazioni quando noise e solo sono disattivati.
 
-## Modifiche TEST9
+## Modifiche TEST11 — countdown ciclico e focus
 
-- **Annuncio iniziale una sola volta:** la prima apertura di una nuova istanza conserva il meccanismo di attesa del provider UI Automation e annuncia la cella iniziale (Band 1 se non è stato salvato un altro cursore). Il primo annuncio completato viene ricordato solo durante la vita dell’istanza. Alle successive aperture non viene ripetuto via notifica: NVDA riceve la posizione dalla normale messa a fuoco dell’editor. Per le istanze già salvate, la posizione continua a essere ripristinata dal progetto.
-- **+3 dB di makeup interno del solo:** il passabanda filtrato è amplificato di 3 dB rispetto alla TEST8, a parità di valore mostrato. **0 dB visualizzati restano 0 dB** (offset dell'utente); la somma effettiva in modalità solo è +3 dB. Con -120 dB selezionati il filtro rimane muto. Range del controllo invariato e nessuna migrazione delle impostazioni.
-- **Compatibilità:** DSP a 36 dB/ottava, analisi, rumore, scorciatoie, dati in Roaming e formato di progetto invariati.
+- **C** apre il countdown nella stessa finestra e porta direttamente al campo di testo **countdown** (1–600 secondi), senza annunci personalizzati.
+- Il gruppo ha esattamente **tre controlli**: `countdown` → `OK` → `Cancel` → `countdown`, con **Tab ciclico**; **Maiusc+Tab** percorre il ciclo al contrario. I pulsanti compaiono solo quando si modifica la durata.
+- **Invio nel campo o su OK** conferma e salva i secondi; **Invio su Cancel** oppure **Esc** annulla senza salvare. Entrambe le azioni tornano alla tabella, senza chiudere il plugin.
+- Le frecce nel campo spostano il cursore di testo; quando il focus è su OK o Cancel vengono intercettate e **non raggiungono la FX Chain**.
+- Il ritorno alla tabella ristabilisce banda e colonna correnti, senza annunciare una banda diversa e senza chiamare una notifica NVDA aggiuntiva.
+- **Esc nella tabella** continua invece a chiudere la finestra FX.
+- **Nessuna modifica al DSP**: filtro, guadagno TEST10, FFT, rumore e trasporto invariati.
+
+## Modifiche TEST10
+
+- **Ripristinato il volume del filtro come in TEST8:** eliminato completamente il makeup interno di +3 dB introdotto nella TEST9. Ora **0 dB visualizzati = 0 dB effettivi** sul segnale filtrato (nessun amplificatore fisso aggiuntivo). Rimangono Ctrl+Freccia su/giù, intervallo da -120 a +24 dB, rampa di 20 ms e salvataggio delle impostazioni. Non è stato cambiato alcun coefficiente del filtro a 36 dB/ottava.
+- **Mantenuta la correzione NVDA della TEST9:** la notifica esplicita della cella viene tentata solo la prima volta per istanza; ai successivi ingressi rimane la normale notifica di focus, per evitare il doppio annuncio.
+- Nessun cambiamento ad analisi, countdown, trasporto, rumore, tabella, percorso dati o formato dei preset.
 
 ## Informazioni TEST8 (conservate)
 
@@ -17,7 +27,7 @@ VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separa
 - **Visivo:** al posto del titolo statico viene mostrata la cella corrente, e sotto il guadagno del passabanda.
 - **DSP confermato:** passabanda di sesto ordine su ciascun lato (36 dB/ottava), stereo, crossfade tra bande di 25 ms, noise, FFT su thread separato, comandi e tabella invariati.
 
-**Attenzione ai picchi:** con il makeup interno, +24 dB mostrati corrispondono a +27 dB effettivi sul segnale filtrato. Non è presente un limiter: i successivi effetti potrebbero ricevere picchi superiori a 0 dBFS.
+**Attenzione ai picchi:** con guadagno utente positivo fino a +24 dB, il segnale filtrato può superare 0 dBFS. Non è presente un limiter.
 
 ## Comandi
 
@@ -28,9 +38,13 @@ VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separa
 | Spazio | REAPER Play/Stop |
 | Ctrl+Spazio | REAPER Play/Pausa |
 | R | Nuova analisi stereo |
-| C | Focus diretto al campo `countdown` (1–600 s), senza finestra modale |
+| C | Entra nel countdown, focus nel campo `countdown` (1–600 s) |
+| Tab / Maiusc+Tab nel countdown | Ciclo tra campo `countdown`, `OK`, `Cancel` (avanti/indietro) |
+| Esc nel countdown | Annulla e torna alla tabella, senza chiudere il VST |
+| Invio su OK o nel campo | Salva e torna alla tabella |
+| Invio su Cancel | Annulla e torna alla tabella |
 | Invio (tabella) | Attiva/disattiva il passabanda della banda corrente |
-| Invio (campo countdown) | Salva la durata, torna alla tabella |
+
 | B | Selezione delle bande |
 | Maiusc+Spazio (in B) | Seleziona/deseleziona banda |
 | X (in B) / Canc | Solo banda selezionata / ripristina tutte le 32 bande |
@@ -39,7 +53,7 @@ VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separa
 | Ctrl+C | Copia il rapporto completo |
 | O / P | Apre il report salvato |
 | F1 | Guida ai comandi (solo su richiesta) |
-| Esc | Esce dalla finestra del VST (secondo il contenitore REAPER) |
+| Esc (tabella) | Esce dalla finestra del VST (secondo il contenitore REAPER) |
 
 **Archiviazione:** `%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\settings.xml` e `spectrum_LastResult.txt`. Posizione della tabella, impostazioni e risultati di ciascuna istanza sono anche nel progetto REAPER. Nessuna cartella Documenti.
 
@@ -48,7 +62,7 @@ VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separa
 Copiare tutti i file **direttamente nella radice del repository locale**, sovrascrivendo quelli precedenti ma senza eliminare `.git`. Include `.github/workflows/build-windows.yml` per Windows 2022 e JUCE 8.0.15.
 
 ```cmd
-git add . && git commit -m "LSpectrum TEST9 NVDA entry once and solo makeup gain" && git push
+git add . && git commit -m "LSpectrum TEST11 countdown focus cycle" && git push
 ```
 
-**Stato:** sorgenti controllati staticamente, con verifica numerica indipendente delle pendenze. La compilazione Windows e il collaudo in REAPER/NVDA restano da effettuare su GitHub Actions.
+**Stato:** verificati staticamente gli handler dei tre controlli e l’assenza di modifiche al DSP rispetto alla TEST10. La compilazione Windows e il collaudo in REAPER/NVDA restano da effettuare su GitHub Actions.
