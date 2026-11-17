@@ -56,6 +56,12 @@ public:
     void selectOnlyBand(int band);
     int getSelectedCount() const;
 
+    // Editor position belongs to this plugin instance and is saved with the DAW project.
+    void rememberEditorPosition(int band, int column, bool selectionMode) noexcept;
+    int getEditorBand() const noexcept { return editorBand.load(std::memory_order_acquire); }
+    int getEditorColumn() const noexcept { return editorColumn.load(std::memory_order_acquire); }
+    bool getEditorSelectionMode() const noexcept { return editorSelectionMode.load(std::memory_order_acquire); }
+
     void setTone(bool enabled) { toneEnabled.store(enabled); }
     bool isToneOn() const { return toneEnabled.load(); }
     void setToneFrequency(float f) { toneFrequency.store(f); }
@@ -71,6 +77,7 @@ public:
     static double frequency(int b);
     juce::File dataDirectory() const;
     juce::File reportFile() const;
+    juce::File levelsFile() const;
     bool saveReport() const;
     void loadSettings();
     void saveSettings() const;
@@ -96,7 +103,10 @@ private:
     std::array<std::array<std::atomic<float>, bands>, 2> amplitudes {};
     std::array<std::atomic<bool>, bands> selected {};
     std::atomic<int> duration {10};
+    std::atomic<int> editorBand {0}, editorColumn {0};
+    std::atomic<bool> editorSelectionMode {false};
     std::atomic<bool> resultReady {false}, quit {false}, signalDetected {false};
+    std::atomic<bool> toneLevelsValid {false}; // Absolute stereo band levels from a completed scan
     std::atomic<int> scanState {0};
     std::atomic<uint64_t> scanSamples {0}, scanTarget {441000};
     std::atomic<double> sampleRateHz {44100.0};
@@ -106,6 +116,7 @@ private:
     std::atomic<bool> toneEnabled {false}, soloEnabled {false};
     NoiseState noiseL, noiseR;
     double tonePhase=0.0;
+    float toneSmoothedL=1.f, toneSmoothedR=1.f, toneFade=0.f; // audio thread only
     juce::dsp::StateVariableTPTFilter<float> soloL, soloR;
     float lastSoloCutoff=0.f, soloMix=0.f;
     std::thread worker;

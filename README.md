@@ -1,66 +1,71 @@
-# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST3 (migrazione / test)
+# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST5
 
-Repository: https://github.com/Lo-lo78/LSpectrum
+**Repository:** https://github.com/Lo-lo78/LSpectrum
 
-Questa versione continua la migrazione dei file **LSpectrum 4.5dB Analyzer.jsfx** e **LSpectrum 4.5dB Analyzer.lua** a un VST3 stereo indipendente da REAPER Lua.
+Migrazione del JSFX e Lua originali a un VST3 C++ JUCE stereo autonomo. Una sola curva di riferimento (4,5 dB/ottava), 32 bande, tabella a quattro colonne, scansione FFT su thread dedicato, ingresso/uscita stereo, generatore di rumore e sinusoide e ascolto passabanda. La correzione di fase non è ancora implementata.
 
-## Correzioni centrali rispetto alla TEST1
+## Novità TEST5 (sinusoide stereo)
 
-- **R avvia una nuova scansione reale del segnale in ingresso L/R**. Un thread FFT riceve gli effettivi campioni stereo passati dal callback audio. L'acquisizione e il riarmo del FIFO avvengono mediante handshake al confine del blocco audio per evitare l'azzeramento dei puntatori in conflitto con il callback.
-- Conta 10 secondi **di audio realmente processato**, modificabili con D (1..600). Se REAPER non invia campioni, non inventa una misurazione: la finestra indica **Waiting for incoming audio from REAPER**. Avviare il transport in REAPER o controllare il routing. Il VST3 non avvia né ferma la DAW.
-- Alla fine **si drenano tutti i campioni fino alla fine della scansione** e si calcolano tutte le finestre FFT, comprese eventuali code. In caso di sovraccarico del FIFO viene segnalato un errore anziché una misura incompleta.
-- La finestra mostra 4 colonne: Banda / Frequenza / differenza dB sinistro / differenza dB destro. I valori sono differenze rispetto a 4,5 dB per ottava, pivot circa 1 kHz. NON dBFS assoluti.
-- Esc tenta di **chiudere la finestra FX flottante di REAPER**, anche mentre analisi e selezione sono attive; non annulla la scansione né disinserisce il plugin. Se la finestra FX è integrata/dockata, la chiusura dipende dal gestore finestre del host: il VST3 rimanda Esc al contenitore senza inviare pericolosi WM_CLOSE alla finestra principale di REAPER. Tasto e pulsante Close (Esc).
-- Restano la selezione di 1..32 bande, l'ascolto passabanda stereo (S), la sinusoide (Invio), il noise stereo (N, + e -), la copia del rapporto e il salvataggio nello stato del progetto.
-- Include entrambe le correzioni necessarie alla TEST1: `juce_generate_juce_header(LSpectrum)` in CMake e `juce::StringArray::fromLines` nel parser. GitHub usa `windows-2022` e Visual Studio 2022.
+- **Un oscillatore, due guadagni indipendenti:** la sinusoide ha la stessa fase sui canali L/R, senza sfasamento artificiale. I due livelli seguono le ampiezze assolute L/R della **banda selezionata nell’ultima scansione completa**. Non vengono usati i dB di differenza rispetto alla curva 4,5 dB, che non rappresentano il volume assoluto.
+- **Panorama proporzionale:** il canale più forte riceve il livello di riferimento del tone; quello più debole è attenuato secondo il rapporto reale fra i livelli. Per esempio, con 6 dB di differenza L/R, il canale più debole riceve circa metà ampiezza. In silenzio misurato, nessuna delle due sinusoidi suona; prima della prima scansione entrambe suonano centrate.
+- **Niente clic:** rampa di 12 ms all’accensione/spegnimento e al cambio dei guadagni L/R durante la navigazione. I cambi di frequenza rimangono quelli previsti dalla TEST4; non è ancora una sintesi con glide.
+- **Volume di riferimento separato:** la navigazione tra bande non cambia più il volume generale della sinusoide in funzione della differenza dalla curva 4,5 dB. Il valore predefinito rimane -24 dB; aprendo un progetto TEST4 viene ripristinato il livello di riferimento -24 dB anziché conservare una vecchia attenuazione transitoria.
+- **Ripristino del panorama:** i livelli assoluti sono salvati nello stato del progetto REAPER e, per l’ultima analisi globale, nel nuovo file `%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\spectrum_LastLevels.txt`. I precedenti rapporti TEST4 rimangono leggibili: se non esistono livelli assoluti salvati, la sinusoide resta centrata fino alla nuova scansione.
+- La misura viene aggiornata **a fine analisi R**, non in modo continuo durante l’ascolto: una nuova scansione aggiorna il panorama; cambiare banda usa i valori memorizzati di quella banda.
 
-## Comandi con NVDA
+## Novità TEST4 (rispetto alla TEST3)
 
-| Tasto | Funzione |
+1. **Comandi trasporto REAPER** dalla finestra VST3: `Spazio` = azione **Transport: Play/stop** (ID 40044); `Ctrl+Spazio` = **Transport: Play/pause** (ID 40073). Su Windows, la finestra principale REAPER è individuata nello **stesso processo** e riceve `WM_COMMAND`, non eventi di tastiera sintetici. Nessuna chiamata al trasporto dal thread audio. Se REAPER è bridged in un altro processo, il comando può non essere disponibile.
+2. **Banda, colonna e modalità della finestra memorizzate per istanza**, sia chiudendo/riaprendo l'editor, sia nel salvataggio del progetto REAPER. All'apertura, il focus torna sulla cella conservata e NVDA riceve direttamente la sua indicazione, senza introduzione lunga.
+3. **Nessuna descrizione introduttiva persistente**: rimossa la frase “Accessible stereo spectrum analyzer...”, così come l'assegnazione della descrizione dell'editor durante ogni annuncio. Il titolo accessibile iniziale identifica la cella.
+4. Lettura diretta **`Left, 2.27 dB` / `Right, 2.27 dB`**, eliminando “difference”.
+5. Messaggi più brevi per avvio e completamento analisi; un unico annuncio per passare tra selezione bande e risultati. Durante l'analisi continua il conto alla rovescia sui campioni realmente acquisiti.
+6. Recuperati i comandi originali `P` per aprire il report e `\\` per leggere le impostazioni, in aggiunta a `O` e `T`.
+
+### Comandi principali NVDA
+
+| Tasti | Azione |
 |---|---|
-| R | Nuova analisi stereo, per la durata memorizzata |
-| D | Imposta la durata (1..600 secondi) |
-| Frecce su/giù, sinistra/destra | Naviga righe e quattro colonne |
-| Home/End, Pagina su/giù | Prima/ultima riga, sposta di otto bande |
-| 1 / 2 / 3 / 4 | Legge le colonne; doppio tocco copia il valore |
-| Tab | Cella, riga e copia riga con pressioni rapide |
-| B | Modalità selezione bande / ritorno risultati |
-| Spazio | Seleziona/deseleziona banda (solo in selezione) |
-| X | Seleziona soltanto la banda corrente |
-| Canc | Ripristina tutte le 32 bande |
-| S | Attiva/disattiva l'ascolto passabanda stereo |
-| Invio | Attiva/disattiva la sinusoide stereo (livelli basati su analisi L/R) |
-| N, +, - | Noise on/off e livello a passi di 5 dB |
-| Ctrl+C | Copia report completo |
-| O | Apre report salvato |
-| T | Legge curva e impostazioni |
-| F1, ? | Legge aiuto sintetico |
-| Esc | Esce dalla finestra del plugin, senza cancellare l'istanza |
+| Spazio | Play/stop di REAPER, anche nella tabella e nella selezione bande |
+| Ctrl+Spazio | Play/pausa di REAPER |
+| R | Nuova analisi stereo reale (10 s predefiniti) |
+| D | Cambia durata (1..600 s) |
+| Frecce, Home/End, Pagina su/giù | Navigazione della tabella |
+| 1, 2, 3, 4 | Leggi colonna; doppio tocco copia valore |
+| Tab veloce 1/2/3 volte | Leggi cella / riga / copia riga |
+| B | Entra/esci dalla selezione delle bande |
+| **Maiusc+Spazio** | **Seleziona/deseleziona banda** nella modalità B (lo Spazio senza Maiusc ora controlla il trasporto) |
+| X / Canc | Seleziona solo banda corrente / tutte le 32 bande |
+| S | Solo passabanda stereo |
+| Invio | Sinusoide stereo |
+| N, +, - | Rumore e suo livello |
+| Ctrl+C | Copia rapporto completo |
+| O / P | Apre ultimo report |
+| T / \\ | Dice durata, curva e numero bande |
+| F1 | Aiuto parlato |
+| Esc | Chiude la finestra FX (il comportamento dockato dipende dal contenitore REAPER) |
 
-I controlli prevedono annunci Windows UI Automation per NVDA, sulla base dell'impostazione già utilizzata nei VST3 accessibili. È necessaria una prova con NVDA e REAPER effettivi.
+### Stato del lavoro
 
-## Dove salva i dati
+- La TEST3 era stata provata in REAPER dall'utente: tabella e passabanda funzionano.
+- La TEST4 aggiorna solo navigazione/trasporto/accessibilità e recupera i due comandi Lua; non tocca i calcoli FFT né il filtraggio audio.
+- **TEST4 non compilata né collaudata con Visual Studio/NVDA in questo ambiente**: convalidare GitHub Actions e il comportamento effettivo di REAPER. Le azioni di trasporto richiedono il REAPER Windows non-bridged.
 
-`%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\settings.xml`
+## Dati e configurazione
 
-`%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\spectrum_LastResult.txt`
+- Globale: `%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\settings.xml` (durata, rumore, selezione bande).
+- Ultimo report: `%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\spectrum_LastResult.txt`.
+- Livelli L/R per la sinusoide: `%APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\spectrum_LastLevels.txt`.
+- Posizione editor, modalità, risultati e impostazioni dell'istanza: stato VST3 salvato dentro il progetto DAW.
 
-Inoltre lo stato di ogni singola istanza viene incluso nel progetto DAW (parametri e risultati).
+## Compilazione GitHub
 
-## Compilazione su GitHub
+Estrarre i file dello ZIP **direttamente nella radice del clone**, senza creare cartelle aggiuntive e senza cancellare la cartella `.git` locale. Includere `.github/workflows/build-windows.yml`. Il workflow configura JUCE 8.0.15 con Visual Studio 2022 su `windows-2022` e produce l'artefatto VST3.
 
-Estrarre **tutti i file, inclusa `.github`**, direttamente nella radice del clone locale `LSpectrum`, mantenendo `.git`. Da CMD aperto in quella cartella:
+Da CMD nella cartella del repository:
 
 ```cmd
-git add . && git commit -m "Continue LSpectrum VST3 migration: stereo scan and Esc" && git push
+git add . && git commit -m "LSpectrum TEST5 stereo sine balance" && git push
 ```
 
-Il workflow compila su `windows-2022`, generatore `Visual Studio 17 2022`, JUCE 8.0.15. Scaricare il VST3 negli Artifacts del run completato.
-
-## Limiti della TEST3
-
-- **Questi sorgenti non sono stati compilati con Visual Studio Windows né collaudati in REAPER / NVDA** nell'ambiente di creazione; la verifica finale avviene su GitHub Actions e nel tuo REAPER.
-- La chiusura forzata di un editor dockato non è garantita: il contenitore grafico appartiene a REAPER, non al VST3.
-- R non può riprodurre il progetto REAPER: misura solo i campioni effettivamente forniti al plugin mentre gira l'audio.
-- I controlli di misura/rotazione della **fase ±180°** non sono inclusi: saranno un lavoro DSP separato dopo aver verificato la misura stereo e il passabanda.
-- Nessuna logica Lua per Track/Master/Kick/ASDFGH: il VST3 analizza il proprio ingresso stereo, indipendentemente dalla posizione nella catena.
+Per la prova: aprire il VST3, raggiungere una banda alta in colonna destra, Esc, riaprire il VST3 e verificarne il ripristino. Premere Spazio e Ctrl+Spazio, poi R su una traccia audio in riproduzione; nella modalità B provare Maiusc+Spazio.

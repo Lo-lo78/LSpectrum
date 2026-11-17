@@ -5,7 +5,7 @@ class LSpectrumEditor final : public juce::AudioProcessorEditor, private juce::T
 {
 public:
     explicit LSpectrumEditor(LSpectrumProcessor&);
-    ~LSpectrumEditor() override = default;
+    ~LSpectrumEditor() override;
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseDown(const juce::MouseEvent&) override;
@@ -19,6 +19,8 @@ private:
     void timerCallback() override;
     void announce(const juce::String&);
     void announceCell();
+    void rememberPosition();
+    bool sendReaperTransportCommand(bool playPause);
     void navigate(int dRow,int dCol);
     void updatePreview();
     void toggleSelectionMode();
@@ -49,6 +51,7 @@ private:
     int digitLast=0;
     bool lastResultStatus=false;
     bool waitingAnnounced=false, captureBegan=false, errorAnnounced=false;
+    bool initialLocationAnnounced=false;
     juce::uint32 scanRequestedMs=0;
     uint64_t previousCaptured=0;
     float previousNoise=-60.f;

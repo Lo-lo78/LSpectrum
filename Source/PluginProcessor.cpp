@@ -65,9 +65,12 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     const float nGain = nDb <= -120.f ? 0.f : std::pow(10.f, nDb / 20.f);
     const float tGain = std::pow(10.f, tDb / 20.f);
     const bool tone = toneEnabled.load();
+    // One oscillator, two independent channel gains. Keeping one phase avoids
+    // inventing an L/R phase offset just to represent the stereo level ratio.
     const float balanceL = toneScaleL.load(), balanceR = toneScaleR.load();
     const double rate = juce::jmax(1.0, sampleRateHz.load());
     const double phaseInc = juce::MathConstants<double>::twoPi * toneFrequency.load() / rate;
+    const float toneSmoothing = (float) (1.0 - std::exp(-1.0 / (0.012 * rate)));
     const bool solo = soloEnabled.load();
     const float cutoff = juce::jlimit(20.f, (float) juce::jmax(30.0, rate * .4), soloFrequency.load());
     if (std::abs(cutoff - lastSoloCutoff) > .01f)
@@ -115,10 +118,17 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
             right[i] = inR + (bandR - inR) * soloMix;
         }
         if (nGain > 0.f) { left[i] += referenceL; right[i] += referenceR; }
-        if (tone)
+        // Smooth the L/R gains as the selected band changes; avoid clicks
+        // when pressing Enter or moving through bands during sine audition.
+        toneSmoothedL += (balanceL - toneSmoothedL) * toneSmoothing;
+        toneSmoothedR += (balanceR - toneSmoothedR) * toneSmoothing;
+        toneFade += ((tone ? 1.f : 0.f) - toneFade) * toneSmoothing;
+        if (!tone && toneFade < 1.e-5f) toneFade = 0.f;
+        if (tone || toneFade > 0.f)
         {
-            const float sine = (float) std::sin(tonePhase) * tGain;
-            left[i] += sine * balanceL; right[i] += sine * balanceR;
+            const float sine = (float) std::sin(tonePhase) * tGain * toneFade;
+            left[i] += sine * toneSmoothedL;
+            right[i] += sine * toneSmoothedR;
             tonePhase += phaseInc;
             if (tonePhase >= juce::MathConstants<double>::twoPi)
                 tonePhase -= juce::MathConstants<double>::twoPi;
@@ -193,15 +203,43 @@ void LSpectrumProcessor::setNoiseLevel(float db)
 {
     noiseDb.store(juce::jlimit(-120.f,0.f,db)); saveSettings();
 }
+void LSpectrumProcessor::rememberEditorPosition(int band, int column, bool selecting) noexcept
+{
+    editorBand.store(juce::jlimit(0,bands-1,band), std::memory_order_release);
+    editorColumn.store(juce::jlimit(0,3,column), std::memory_order_release);
+    editorSelectionMode.store(selecting, std::memory_order_release);
+}
 void LSpectrumProcessor::setToneStereoBand(int band)
 {
-    if(band<0 || band>=bands) return;
-    const float left=amplitudes[0][(size_t)band].load();
-    const float right=amplitudes[1][(size_t)band].load();
-    const float maxAmp=juce::jmax(left,right);
-    if (maxAmp<1.0e-10f) {toneScaleL.store(1.f);toneScaleR.store(1.f);return;}
-    toneScaleL.store(juce::jlimit(0.f,1.f,left/maxAmp));
-    toneScaleR.store(juce::jlimit(0.f,1.f,right/maxAmp));
+    if (band < 0 || band >= bands) return;
+
+    // On first launch, before any scan, keep the sine audible in both ears.
+    // A completed scan provides TRUE per-channel FFT magnitudes, not the
+    // displayed deviations from the 4.5 dB/oct reference curve.
+    if (!toneLevelsValid.load(std::memory_order_acquire))
+    {
+        toneScaleL.store(1.f); toneScaleR.store(1.f);
+        return;
+    }
+    if (!signalDetected.load())
+    {
+        toneScaleL.store(0.f); toneScaleR.store(0.f);
+        return;
+    }
+    const float left = juce::jmax(0.f, amplitudes[0][(size_t)band].load());
+    const float right = juce::jmax(0.f, amplitudes[1][(size_t)band].load());
+    const float maxAmp = juce::jmax(left, right);
+    // Silence should not be normalised to a full-volume sine.
+    if (maxAmp <= 1.0e-6f || !std::isfinite(maxAmp))
+    {
+        toneScaleL.store(0.f); toneScaleR.store(0.f);
+        return;
+    }
+    // Equivalent to gain = 10^((channelDb - louderChannelDb)/20).
+    // This preserves the measured stereo level difference without
+    // changing the global reference sine level or the relative phase.
+    toneScaleL.store(juce::jlimit(0.f, 1.f, left / maxAmp));
+    toneScaleR.store(juce::jlimit(0.f, 1.f, right / maxAmp));
 }
 double LSpectrumProcessor::frequency(int b)
 {
@@ -338,6 +376,7 @@ void LSpectrumProcessor::workerLoop()
                                     (float) std::pow(10., (absolute[(size_t) ch][(size_t) b] / nFrames) / 20.));
                             }
                         signalDetected.store(foundSignal);
+                        toneLevelsValid.store(true, std::memory_order_release);
                         // Do not publish an old result over a newly requested scan.
                         {
                             std::lock_guard<std::mutex> guard(requestMutex);
@@ -366,6 +405,10 @@ juce::File LSpectrumProcessor::reportFile() const
 {
     return dataDirectory().getChildFile("spectrum_LastResult.txt");
 }
+juce::File LSpectrumProcessor::levelsFile() const
+{
+    return dataDirectory().getChildFile("spectrum_LastLevels.txt");
+}
 juce::String LSpectrumProcessor::reportText() const
 {
     juce::String text="LSpectrum 4.5dB Analyzer\nReference: 4.5 dB/oct\n";
@@ -380,7 +423,17 @@ juce::String LSpectrumProcessor::reportText() const
 bool LSpectrumProcessor::saveReport() const
 {
     auto dir=dataDirectory(); if(dir.createDirectory().failed()) return false;
-    return reportFile().replaceWithText(reportText());
+    // The public report remains a four-column table. This companion file
+    // stores the absolute measured stereo magnitudes for sine panorama
+    // restoration after reopening REAPER, without altering displayed dB data.
+    juce::String levels = "Band | Left magnitude | Right magnitude\n";
+    for (int b = 0; b < bands; ++b)
+        levels += juce::String(b + 1) + " | "
+                + juce::String((double)amplitudes[0][(size_t)b].load(), 9) + " | "
+                + juce::String((double)amplitudes[1][(size_t)b].load(), 9) + "\n";
+    const bool okReport = reportFile().replaceWithText(reportText());
+    const bool okLevels = levelsFile().replaceWithText(levels);
+    return okReport && okLevels;
 }
 void LSpectrumProcessor::saveSettings() const
 {
@@ -396,6 +449,9 @@ void LSpectrumProcessor::loadSettings()
     auto xml=juce::XmlDocument::parse(dataDirectory().getChildFile("settings.xml"));
     if(!xml || !xml->hasTagName("LSpectrumSettings")) return;
     duration.store(juce::jlimit(1,600,xml->getIntAttribute("Duration",10)));
+    editorBand.store(juce::jlimit(0,bands-1,xml->getIntAttribute("EditorBand",0)));
+    editorColumn.store(juce::jlimit(0,3,xml->getIntAttribute("EditorColumn",0)));
+    editorSelectionMode.store(xml->getBoolAttribute("EditorSelectionMode", false));
     noiseDb.store((float)xml->getDoubleAttribute("NoiseDb",-120.));
     for(int b=0;b<bands;++b) selected[(size_t)b].store(xml->getBoolAttribute("Band"+juce::String(b+1),true));
     if(getSelectedCount()==0) for(auto& s:selected) s.store(true);
@@ -418,23 +474,49 @@ void LSpectrumProcessor::loadLastResult()
     }
     resultReady.store(loaded>0);
     signalDetected.store(loaded>0);
+    // TEST4 report files do not have these levels: retain the original
+    // centred sine in that case until a fresh scan is completed.
+    int restored = 0;
+    if (loaded > 0 && levelsFile().existsAsFile())
+        for (const auto& line : juce::StringArray::fromLines(levelsFile().loadFileAsString()))
+        {
+            const auto parts = juce::StringArray::fromTokens(line, "|", "");
+            if (parts.size() != 3) continue;
+            const int band = parts[0].trim().getIntValue();
+            if (band < 1 || band > bands) continue;
+            const double left = parts[1].trim().getDoubleValue();
+            const double right = parts[2].trim().getDoubleValue();
+            if (!std::isfinite(left) || !std::isfinite(right) || left < 0. || right < 0.) continue;
+            amplitudes[0][(size_t)(band - 1)].store((float)left);
+            amplitudes[1][(size_t)(band - 1)].store((float)right);
+            ++restored;
+        }
+    toneLevelsValid.store(restored == bands, std::memory_order_release);
 }
 void LSpectrumProcessor::getStateInformation(juce::MemoryBlock& dest)
 {
     juce::XmlElement xml("LSpectrumState");
     xml.setAttribute("Duration",duration.load());
+    xml.setAttribute("EditorBand", editorBand.load());
+    xml.setAttribute("EditorColumn", editorColumn.load());
+    xml.setAttribute("EditorSelectionMode", editorSelectionMode.load());
     xml.setAttribute("NoiseDb",(double)noiseDb.load());
     xml.setAttribute("ToneDb",(double)toneDb.load());
+    xml.setAttribute("StereoSineVersion",1); // TEST5: independent L/R gains
     xml.setAttribute("ToneFreq",(double)toneFrequency.load());
     xml.setAttribute("ToneOn",toneEnabled.load());
     xml.setAttribute("SoloOn",soloEnabled.load());
     xml.setAttribute("SoloFreq",(double)soloFrequency.load());
     xml.setAttribute("HasResult",resultReady.load());
+    xml.setAttribute("HasToneLevels",toneLevelsValid.load());
+    xml.setAttribute("HadSignal",signalDetected.load());
     for(int b=0;b<bands;++b)
     {
         xml.setAttribute("Band"+juce::String(b+1),selected[(size_t)b].load());
         xml.setAttribute("Left"+juce::String(b+1),(double)getResult(b,0));
         xml.setAttribute("Right"+juce::String(b+1),(double)getResult(b,1));
+        xml.setAttribute("ToneLeft"+juce::String(b+1),(double)getBandAmplitude(b,0));
+        xml.setAttribute("ToneRight"+juce::String(b+1),(double)getBandAmplitude(b,1));
     }
     copyXmlToBinary(xml,dest);
 }
@@ -443,8 +525,17 @@ void LSpectrumProcessor::setStateInformation(const void* data,int size)
     auto xml=getXmlFromBinary(data,size);
     if(!xml || !xml->hasTagName("LSpectrumState")) return;
     duration.store(juce::jlimit(1,600,xml->getIntAttribute("Duration",10)));
+    editorBand.store(juce::jlimit(0,bands-1,xml->getIntAttribute("EditorBand",0)));
+    editorColumn.store(juce::jlimit(0,3,xml->getIntAttribute("EditorColumn",0)));
+    editorSelectionMode.store(xml->getBoolAttribute("EditorSelectionMode", false));
     noiseDb.store((float)xml->getDoubleAttribute("NoiseDb",-120.));
-    toneDb.store((float)xml->getDoubleAttribute("ToneDb",-24.));
+    // TEST4 changed the global sine level when navigating a different band.
+    // That old value was transient, not a user setting: reset to -24 dB
+    // on old projects to avoid a nearly inaudible TEST5 sine.
+    const bool hasStereoSine = xml->getIntAttribute("StereoSineVersion",0) >= 1;
+    toneDb.store(hasStereoSine
+        ? juce::jlimit(-60.f, 0.f, (float)xml->getDoubleAttribute("ToneDb",-24.))
+        : -24.f);
     toneFrequency.store((float)xml->getDoubleAttribute("ToneFreq",440.));
     toneEnabled.store(xml->getBoolAttribute("ToneOn",false));
     soloEnabled.store(xml->getBoolAttribute("SoloOn",false));
@@ -454,9 +545,13 @@ void LSpectrumProcessor::setStateInformation(const void* data,int size)
         selected[(size_t)b].store(xml->getBoolAttribute("Band"+juce::String(b+1),true));
         results[0][(size_t)b].store((float)xml->getDoubleAttribute("Left"+juce::String(b+1),0.));
         results[1][(size_t)b].store((float)xml->getDoubleAttribute("Right"+juce::String(b+1),0.));
+        amplitudes[0][(size_t)b].store((float)xml->getDoubleAttribute("ToneLeft"+juce::String(b+1),0.));
+        amplitudes[1][(size_t)b].store((float)xml->getDoubleAttribute("ToneRight"+juce::String(b+1),0.));
     }
     if(getSelectedCount()==0) for(auto& s:selected) s.store(true);
     resultReady.store(xml->getBoolAttribute("HasResult",false));
+    toneLevelsValid.store(xml->getBoolAttribute("HasToneLevels",false), std::memory_order_release);
+    signalDetected.store(xml->getBoolAttribute("HadSignal",resultReady.load()));
 }
 juce::AudioProcessorEditor* LSpectrumProcessor::createEditor() {return new LSpectrumEditor(*this);}
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {return new LSpectrumProcessor();}

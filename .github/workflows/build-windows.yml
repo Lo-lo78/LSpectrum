@@ -19,6 +19,6 @@ jobs:
         run: cmake --build build --config Release --parallel 2
       - uses: actions/upload-artifact@v4
         with:
-          name: LSpectrum-4.5dB-Analyzer-VST3-TEST3
+          name: LSpectrum-4.5dB-Analyzer-VST3-TEST4
           path: build/LSpectrum_artefacts/Release/VST3/
           if-no-files-found: error

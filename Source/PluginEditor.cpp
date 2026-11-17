@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 #include "ScreenReaderAnnouncer.h"
+#include <cmath>
+#include <cwchar>
 
 #if JUCE_WINDOWS
  #include <windows.h>
@@ -10,21 +12,85 @@ namespace
     constexpr int headerHeight=25, lineHeight=18;
     const char* columnLabels[4]={"Band","Frequency (Hz)","Left diff (dB)","Right diff (dB)"};
 }
+// REAPER-specific Windows GUI bridge: dispatch the documented main-section
+// transport actions, rather than injecting keystrokes into the window tree.
+// All calls happen in response to a UI key press, never on the audio thread.
+namespace
+{
+#if JUCE_WINDOWS
+    HWND findReaperWindowInThisProcess()
+    {
+        HWND found = nullptr;
+        EnumWindows([](HWND hwnd, LPARAM userdata) -> BOOL
+        {
+            DWORD ownerPid = 0;
+            GetWindowThreadProcessId(hwnd, &ownerPid);
+            if (ownerPid != GetCurrentProcessId()) return TRUE;
+            wchar_t cls[128] {};
+            GetClassNameW(hwnd, cls, 128);
+            if (std::wcscmp(cls, L"REAPERwnd") != 0) return TRUE;
+            *reinterpret_cast<HWND*>(userdata) = hwnd;
+            return FALSE;
+        }, reinterpret_cast<LPARAM>(&found));
+        return found;
+    }
+#endif
+}
+
+bool LSpectrumEditor::sendReaperTransportCommand(bool playPause)
+{
+#if JUCE_WINDOWS
+    if (auto* hwnd = findReaperWindowInThisProcess())
+    {
+        // 40044 = Transport: Play/stop; 40073 = Transport: Play/pause.
+        // Post to REAPER's own top-level window, never to the VST child.
+        if (PostMessageW(hwnd, WM_COMMAND, MAKEWPARAM(playPause ? 40073 : 40044, 0), 0))
+            return true;
+    }
+#endif
+    announce("REAPER transport unavailable from this plugin window");
+    return false;
+}
+
 LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
     setSize(810,830);
     setWantsKeyboardFocus(true);
     setMouseClickGrabsKeyboardFocus(true);
-    setTitle("LSpectrum 4.5dB Analyzer");
-    setDescription("Accessible stereo spectrum analyzer. Use arrow keys for the table. F1 for help.");
+    // Keep the accessible label tied to the CURRENT cell, never to an
+    // introductory description that NVDA repeats at each editor opening.
+    setDescription({});
+    selectionMode = processor.getEditorSelectionMode();
+    col = juce::jlimit(0, 3, processor.getEditorColumn());
+    const int savedBand = juce::jlimit(0, LSpectrumProcessor::bands-1, processor.getEditorBand());
+    if (selectionMode) row = savedBand;
+    else
+    {
+        int visibleIndex = 0;
+        int nearestRow = 0;
+        int nearestDistance = LSpectrumProcessor::bands;
+        for (int band=0; band<LSpectrumProcessor::bands; ++band)
+            if (processor.getBandSelected(band))
+            {
+                const int distance = std::abs(band - savedBand);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearestRow = visibleIndex;
+                }
+                ++visibleIndex;
+            }
+        row = nearestRow;
+    }
+    setTitle(cellText());
     for(auto* label : {&status,&guide})
     {
         addAndMakeVisible(*label);
         label->setJustificationType(juce::Justification::centredLeft);
         label->setColour(juce::Label::textColourId,juce::Colours::white);
     }
-    guide.setText("Arrows: table   B: choose bands   Space: select   R: analyze   S: solo   Enter: sine   F1: help",juce::dontSendNotification);
+    guide.setText("Arrows: table   Space: play/stop   Ctrl+Space: play/pause   B: bands   Shift+Space: select   R: analyze   F1: help",juce::dontSendNotification);
     status.setText(p.hasResult() ? "Previous result available. Press R for a new scan."
                                  : "Ready. Start playback in REAPER, then press R to analyze " + juce::String(p.getDuration()) + " seconds.",juce::dontSendNotification);
     lastResultStatus=p.hasResult();
@@ -57,11 +123,34 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     closeButton.onClick=[this]{requestClose();};
     status.addKeyListener(this);
     guide.addKeyListener(this);
-    updatePreview(); refreshScreen(); startTimerHz(8);
+    updatePreview(); refreshScreen(); rememberPosition(); startTimerHz(8);
+}
+LSpectrumEditor::~LSpectrumEditor()
+{
+    rememberPosition();
 }
 void LSpectrumEditor::visibilityChanged()
 {
-    if(isShowing()) grabKeyboardFocus();
+    if (isShowing())
+    {
+        setTitle(cellText());
+        grabKeyboardFocus();
+        if (!initialLocationAnnounced)
+        {
+            initialLocationAnnounced = true;
+            auto safe = juce::Component::SafePointer<LSpectrumEditor>(this);
+            juce::Timer::callAfterDelay(120, [safe]
+            {
+                if (safe && safe->isShowing()) safe->announceCell();
+            });
+        }
+    }
+    else
+    {
+        // Some REAPER window layouts hide/re-show the same editor instance.
+        // Announce the retained cell again the next time it becomes visible.
+        initialLocationAnnounced = false;
+    }
 }
 void LSpectrumEditor::paint(juce::Graphics& graphics)
 {
@@ -152,7 +241,7 @@ void LSpectrumEditor::mouseDown(const juce::MouseEvent& event)
     int newCol=0;
     for(int c=0;c<3;++c) {if(x<widths[c]) break; x-=widths[c];++newCol;}
     row=newRow;col=newCol;
-    updatePreview(); refreshScreen(); grabKeyboardFocus(); announceCell();
+    updatePreview(); rememberPosition(); refreshScreen(); grabKeyboardFocus(); announceCell();
     if(selectionMode && event.getNumberOfClicks()>1) toggleCurrentBand();
 }
 void LSpectrumEditor::announce(const juce::String& message)
@@ -182,7 +271,7 @@ juce::String LSpectrumEditor::fieldText(int column) const
     if(column==1) return currentBandLabel();
     if(selectionMode) return processor.getBandSelected(band)?"Selected":"Not selected";
     if(!processor.hasResult()) return "No results yet";
-    return juce::String(column==2?"Left, ":"Right, ")+juce::String(processor.getResult(band,column-2),2)+" dB difference";
+    return juce::String(column==2?"Left, ":"Right, ")+juce::String(processor.getResult(band,column-2),2)+" dB";
 }
 juce::String LSpectrumEditor::cellText() const
 {
@@ -198,6 +287,10 @@ juce::String LSpectrumEditor::rowText() const
     return text+", left "+juce::String(processor.getResult(band,0),2)
         +" dB, right "+juce::String(processor.getResult(band,1),2)+" dB";
 }
+void LSpectrumEditor::rememberPosition()
+{
+    processor.rememberEditorPosition(bandAtRow(), col, selectionMode);
+}
 void LSpectrumEditor::announceCell() {announce(cellText());}
 void LSpectrumEditor::navigate(int dRow,int dCol)
 {
@@ -206,7 +299,7 @@ void LSpectrumEditor::navigate(int dRow,int dCol)
     col=juce::jlimit(0,3,col+dCol);
     if(oldRow!=row || oldCol!=col)
     {
-        updatePreview(); refreshScreen(); announceCell();
+        updatePreview(); rememberPosition(); refreshScreen(); announceCell();
     }
 }
 void LSpectrumEditor::updatePreview()
@@ -216,8 +309,6 @@ void LSpectrumEditor::updatePreview()
     processor.setToneFrequency(frequency);
     processor.setSoloFrequency(frequency);
     processor.setToneStereoBand(band);
-    const float dev=.5f*(processor.getResult(band,0)+processor.getResult(band,1));
-    processor.setToneLevel(juce::jlimit(-60.f,-18.f,-24.f+dev));
 }
 void LSpectrumEditor::toggleSelectionMode()
 {
@@ -232,9 +323,8 @@ void LSpectrumEditor::toggleSelectionMode()
         row=juce::jlimit(0,totalRows()-1,row);
     }
     col=0;
-    refreshScreen(); updatePreview();
-    announce(selectionMode?"Band selection mode. Space to toggle band":"Result table mode");
-    announceCell();
+    rememberPosition(); refreshScreen(); updatePreview();
+    announce((selectionMode ? "Band selection. " : "Results. ") + cellText());
 }
 void LSpectrumEditor::toggleCurrentBand()
 {
@@ -243,7 +333,7 @@ void LSpectrumEditor::toggleCurrentBand()
     if(processor.getBandSelected(band) && processor.getSelectedCount()==1)
     {announce("At least one band must remain selected");return;}
     processor.setBandSelected(band,!processor.getBandSelected(band));
-    announceCell(); refreshScreen();
+    rememberPosition(); announceCell(); refreshScreen();
 }
 void LSpectrumEditor::refreshScreen()
 {
@@ -261,8 +351,7 @@ void LSpectrumEditor::startAnalysis()
     previousCaptured=0;
     scanRequestedMs=juce::Time::getMillisecondCounter();
     status.setText("Preparing new stereo scan...", juce::dontSendNotification);
-    announce("New stereo scan requested. " + juce::String(processor.getDuration())
-             + " seconds. The VST analyzes incoming audio; start playback in REAPER if stopped.");
+    announce("Analyzing: " + juce::String(processor.getDuration()) + " seconds");
     refreshScreen();
 }
 void LSpectrumEditor::changeDuration()
@@ -337,7 +426,7 @@ void LSpectrumEditor::timerCallback()
             if(!waitingAnnounced && now-scanRequestedMs>1500)
             {
                 waitingAnnounced=true;
-                announce("Waiting for incoming audio. Start playback in REAPER, or check the input routing.");
+                announce("Waiting for REAPER audio. Press Space to play.");
             }
         }
         else if(state==3)
@@ -349,7 +438,7 @@ void LSpectrumEditor::timerCallback()
             if(!captureBegan)
             {
                 captureBegan=true;
-                announce("Audio capture active");
+                // Countdown below is the only capture announcement.
             }
             const int seconds=processor.getRemainingSeconds();
             status.setText("Analyzing stereo, "+juce::String(seconds)
@@ -367,9 +456,7 @@ void LSpectrumEditor::timerCallback()
                             : "Analysis complete: silence or no significant audio.",
                        juce::dontSendNotification);
         updatePreview();refreshScreen();
-        announce((good ? "Stereo analysis complete. "
-                        : "Analysis complete, but input was silent. ")
-                 +juce::String(processor.getSelectedCount())+" selected bands. "+rowText());
+        announce((good ? "Analysis complete. " : "Analysis complete, silence. ") + cellText());
     }
 }
 
@@ -442,6 +529,24 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     const auto mods=key.getModifiers();
     // Esc never cancels a measurement or returns to selection mode: always EXIT.
     if(k==juce::KeyPress::escapeKey) {requestClose();return true;}
+    // REAPER transport is handled by action IDs on the GUI thread, not by
+    // sending synthetic keypresses or touching the audio callback.
+    if (k==' ' && mods.isCtrlDown())
+    {
+        sendReaperTransportCommand(true);
+        return true;
+    }
+    if (k==' ' && mods.isShiftDown())
+    {
+        if (selectionMode) toggleCurrentBand();
+        else announce("Press B to select bands");
+        return true;
+    }
+    if (k==' ')
+    {
+        sendReaperTransportCommand(false);
+        return true;
+    }
     if(mods.isCtrlDown() && (k=='c'||k=='C'))
     {
         if(processor.hasResult()) copy(processor.reportText(),"Full report copied");
@@ -462,18 +567,12 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     if(k=='s'||k=='S'){toggleSolo();return true;}
     if(k=='n'||k=='N'){toggleNoise();return true;}
     if(k==juce::KeyPress::returnKey){toggleTone();return true;}
-    if(k==' ')
-    {
-        if(selectionMode)toggleCurrentBand();
-        else announce("Press B to choose bands. Start and stop playback with REAPER transport.");
-        return true;
-    }
     if(k=='x'||k=='X')
     {
         if(selectionMode)
         {
             processor.selectOnlyBand(bandAtRow());
-            refreshScreen();announce("Only current band selected. "+rowText());
+            rememberPosition();refreshScreen();announce("Only current band selected. "+rowText());
         }
         else announce("Press B to enter band selection mode first");
         return true;
@@ -482,7 +581,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     {
         processor.selectAllBands();
         if(!selectionMode)row=0;
-        refreshScreen();updatePreview();announce("All 32 bands restored");return true;
+        rememberPosition();refreshScreen();updatePreview();announce("All 32 bands restored");return true;
     }
     if(k=='+'||k=='-')
     {
@@ -492,15 +591,15 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
         refreshScreen();
         announce("Noise level "+juce::String(processor.getNoiseLevel(),0)+" dB");return true;
     }
-    if(k=='o'||k=='O'){openReport.triggerClick();return true;}
-    if(k=='t'||k=='T')
+    if(k=='o'||k=='O'||k=='p'||k=='P'){openReport.triggerClick();return true;}
+    if(k=='t'||k=='T'||k=='\\')
     {
         announce("4.5 dB per octave. "+juce::String(processor.getSelectedCount())+" bands active. Duration "+juce::String(processor.getDuration())+" seconds.");
         return true;
     }
     if(k==juce::KeyPress::F1Key || k=='?')
     {
-        announce("Arrows move through rows and four columns. R scans. D sets seconds. B edits band selection, Space toggles, X selects only the current band. Delete restores all. S solos the current band. Enter toggles sine. N toggles noise, plus and minus adjust its level. Numbers 1 to 4 read columns. Control C copies the report. Escape closes the plugin editor.");
+        announce("Arrows navigate the four columns. Space: REAPER play stop. Control Space: play pause. R: analyze. D: duration. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. S: bandpass solo. Enter: sine. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
         return true;
     }
     if(k==juce::KeyPress::tabKey)

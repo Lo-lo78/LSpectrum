@@ -11,7 +11,6 @@ namespace lspectrum
 {
 void announceToActiveScreenReader (juce::Component& source, const juce::String& message, bool preserveOrder)
 {
-    source.setDescription (message);
 
    #if JUCE_WINDOWS
     if (! UiaClientsAreListening())

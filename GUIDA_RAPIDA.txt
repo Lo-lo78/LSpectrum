@@ -1,15 +1,37 @@
-LSpectrum 4.5dB Analyzer VST3 — TEST3, guida NVDA
+LSpectrum 4.5dB Analyzer VST3 — TEST4, guida NVDA
 
-1. Apri il plugin in REAPER e avvia la riproduzione.
-2. Premi R. L'analizzatore campiona l'ingresso stereo per 10 secondi (o il tempo salvato con D).
-   Se non riceve audio, annuncia l'attesa e non produce risultati inventati.
-3. Al termine premi le frecce per spostarti su bande e colonne L/R; 1-4 legge la colonna.
-4. B entra in selezione bande, X tiene solo la corrente, Spazio aggiunge/rimuove, B ritorna.
-5. S attiva il passabanda stereo; Invio la sinusoide; N il rumore 4,5 dB.
-6. Ctrl+C copia il report con L/R. O apre l'ultimo report testuale.
-7. Esc esce dalla finestra flottante del plugin (senza rimuovere il VST). Se usi un editor dockato, la chiusura viene demandata a REAPER.
+ENTRATA E NAVIGAZIONE
+- Aprendo la finestra, viene annunciata la cella in cui eri rimasto: banda e colonna (o selezione).
+- La posizione (banda, colonna, modalità B) resta nella singola istanza e viene salvata con il progetto.
+- Frecce: righe e quattro colonne (banda, Hz, dB sinistro, dB destro).
+- Home/End e Pagina su/giù: prima/ultima riga e salto di 8 righe.
+- 1, 2, 3, 4: leggi la colonna; doppia pressione: copia il valore.
+- Tab: cella; due Tab veloci: riga; tre Tab veloci: copia riga.
 
-IMPORTANTE: non c'è un comando Play/Stop della DAW. R misura il segnale che entra nel VST3.
-I valori dB sono differenze dalla curva di riferimento 4,5 dB/ottava, NON dBFS.
+TRASPORTO DI REAPER (ANCHE QUANDO IL PLUGIN HA IL FOCUS)
+- Spazio: Play/Stop, azione REAPER 40044.
+- Ctrl+Spazio: Play/Pausa, azione REAPER 40073.
+- Per lasciare Spazio dedicato al trasporto, nella modalità B la selezione passa a MAIUSC+SPAZIO.
+- I comandi di trasporto sono disponibili su Windows con REAPER non bridged nello stesso processo del plugin.
+
+ANALISI E ASCOLTO
+- R: nuova analisi stereo sul segnale in ingresso; 10 secondi predefiniti.
+- D: cambia durata (1..600 secondi); il conteggio avanza sui campioni processati.
+- B: modifica bande visibili; Maiusc+Spazio seleziona/deseleziona.
+- X: lascia selezionata soltanto la banda corrente; Canc: riattiva tutte le 32 bande.
+- S: passabanda stereo in solo sulla banda attuale.
+- Invio: sinusoide di anteprima (bilanciamento L/R dall'analisi).
+- N: rumore di riferimento; + / -: cambia livello di 5 dB.
+- Ctrl+C: copia rapporto; O o P: apre ultimo rapporto salvato.
+- T o barra rovesciata: riepilogo impostazioni; F1: aiuto parlato.
+- Esc: esce dalla finestra del plugin; non rimuove il VST dalla catena FX.
+
+Non ci sono piu' i vecchi comandi Lua per track/master, Kick o curve multiple.
+I dB indicano differenze dalla curva 4.5 dB/ottava, non dBFS assoluti.
+La fase -180/+180 non e' ancora implementata.
 
 Dati: %APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer
+Repository: https://github.com/Lo-lo78/LSpectrum
+
+TEST5 — SINE STEREO
+Premi R per una nuova scansione reale. Dopo la fine, seleziona una banda e premi Invio: il livello della sinusoide su L e R segue le ampiezze misurate nei due canali di quella banda, conservando una fase comune. Prima della prima scansione la sinusoide è centrata. La sinusoide non modifica da sola la fase dell'audio originale.

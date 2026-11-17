@@ -1,0 +1,7 @@
+# CMake/JUCE build artifacts
+/build/
+/out/
+/.vs/
+*.user
+*.suo
+.DS_Store
