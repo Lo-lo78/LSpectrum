@@ -47,7 +47,6 @@ public:
     uint64_t getCapturedSamples() const { return scanSamples.load(); }
     int getRemainingSeconds() const;
     float getResult(int b, int channel) const { return results[(size_t)channel][(size_t)b].load(); }
-    float getBandAmplitude(int b, int channel) const { return amplitudes[(size_t)channel][(size_t)b].load(); }
     int getDuration() const { return duration.load(); }
     void setDuration(int seconds);
     bool getBandSelected(int b) const { return selected[(size_t)b].load(); }
@@ -62,12 +61,6 @@ public:
     int getEditorColumn() const noexcept { return editorColumn.load(std::memory_order_acquire); }
     bool getEditorSelectionMode() const noexcept { return editorSelectionMode.load(std::memory_order_acquire); }
 
-    void setTone(bool enabled) { toneEnabled.store(enabled); }
-    bool isToneOn() const { return toneEnabled.load(); }
-    void setToneFrequency(float f) { toneFrequency.store(f); }
-    void setToneLevel(float db) { toneDb.store(db); }
-    float getToneLevel() const { return toneDb.load(); }
-    void setToneStereoBand(int band);
     void setNoiseLevel(float db);
     float getNoiseLevel() const { return noiseDb.load(); }
     void setSolo(bool enabled) { soloEnabled.store(enabled); }
@@ -77,7 +70,6 @@ public:
     static double frequency(int b);
     juce::File dataDirectory() const;
     juce::File reportFile() const;
-    juce::File levelsFile() const;
     bool saveReport() const;
     void loadSettings();
     void saveSettings() const;
@@ -87,7 +79,7 @@ public:
 private:
     void workerLoop();
     bool analyzeFrame(const std::array<float, fftSize>& frame, double sampleRate,
-                      std::array<double, bands>& deviations, std::array<double, bands>& absoluteLevels);
+                      std::array<double, bands>& deviations);
     struct NoiseState
     {
         float brown=0, b0=0, b1=0, b2=0, b3=0;
@@ -100,23 +92,18 @@ private:
     std::array<float, ringSize * 2> ring {}; // L,R interleaved; no allocations on audio thread
     std::atomic<uint64_t> writeIndex {0}, readIndex {0}, scanEndIndex {0};
     std::array<std::array<std::atomic<float>, bands>, 2> results {};
-    std::array<std::array<std::atomic<float>, bands>, 2> amplitudes {};
     std::array<std::atomic<bool>, bands> selected {};
     std::atomic<int> duration {10};
     std::atomic<int> editorBand {0}, editorColumn {0};
     std::atomic<bool> editorSelectionMode {false};
     std::atomic<bool> resultReady {false}, quit {false}, signalDetected {false};
-    std::atomic<bool> toneLevelsValid {false}; // Absolute stereo band levels from a completed scan
     std::atomic<int> scanState {0};
     std::atomic<uint64_t> scanSamples {0}, scanTarget {441000};
     std::atomic<double> sampleRateHz {44100.0};
-    std::atomic<float> noiseDb {-120.f}, toneDb {-24.f}, toneFrequency {440.f};
-    std::atomic<float> toneScaleL {1.f}, toneScaleR {1.f};
+    std::atomic<float> noiseDb {-120.f};
     std::atomic<float> soloFrequency {440.f};
-    std::atomic<bool> toneEnabled {false}, soloEnabled {false};
+    std::atomic<bool> soloEnabled {false};
     NoiseState noiseL, noiseR;
-    double tonePhase=0.0;
-    float toneSmoothedL=1.f, toneSmoothedR=1.f, toneFade=0.f; // audio thread only
     juce::dsp::StateVariableTPTFilter<float> soloL, soloR;
     float lastSoloCutoff=0.f, soloMix=0.f;
     std::thread worker;

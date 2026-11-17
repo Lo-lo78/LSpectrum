@@ -90,23 +90,36 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
         label->setJustificationType(juce::Justification::centredLeft);
         label->setColour(juce::Label::textColourId,juce::Colours::white);
     }
-    guide.setText("Arrows: table   Space: play/stop   Ctrl+Space: play/pause   B: bands   Shift+Space: select   R: analyze   F1: help",juce::dontSendNotification);
+    guide.setText("Arrows: table   Space: play/stop   Ctrl+Space: play/pause   Enter: bandpass   C: countdown   R: analyze   F1: help",juce::dontSendNotification);
     status.setText(p.hasResult() ? "Previous result available. Press R for a new scan."
                                  : "Ready. Start playback in REAPER, then press R to analyze " + juce::String(p.getDuration()) + " seconds.",juce::dontSendNotification);
     lastResultStatus=p.hasResult();
-    for(auto* button : {&analyze,&duration,&selection,&solo,&tone,&noise,&copyReport,&openReport,&closeButton})
+    for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&countdownSave,&copyReport,&openReport,&closeButton})
     {
         addAndMakeVisible(*button);
         button->setMouseClickGrabsKeyboardFocus(false);
         button->setWantsKeyboardFocus(false);
         button->addKeyListener(this);
     }
+    // Save is the only control in the top toolbar that must also be
+    // keyboard-reachable from the countdown edit with Tab.
+    countdownSave.setWantsKeyboardFocus(true);
     analyze.onClick=[this]{startAnalysis();grabKeyboardFocus();};
     duration.onClick=[this]{changeDuration();};
     selection.onClick=[this]{toggleSelectionMode();grabKeyboardFocus();};
     solo.onClick=[this]{toggleSolo();grabKeyboardFocus();};
-    tone.onClick=[this]{toggleTone();grabKeyboardFocus();};
     noise.onClick=[this]{toggleNoise();grabKeyboardFocus();};
+    // The countdown is edited directly in the VST window. No AlertWindow,
+    // duplicate Save announcements or focus transfer to a native modal.
+    addAndMakeVisible(countdownInput);
+    countdownInput.setName("countdown");
+    countdownInput.setDescription({});
+    countdownInput.setInputRestrictions(3, "0123456789");
+    countdownInput.setText(juce::String(processor.getDuration()), false);
+    countdownInput.addKeyListener(this);
+    countdownInput.onReturnKey=[this]{saveCountdown();};
+    countdownInput.onEscapeKey=[this]{requestClose();};
+    countdownSave.onClick=[this]{saveCountdown();};
     copyReport.onClick=[this]
     {
         if(!processor.hasResult()) announce("No analysis results yet");
@@ -222,12 +235,13 @@ void LSpectrumEditor::resized()
     analyze.setBounds(12,140,137,33);
     duration.setBounds(157,140,137,33);
     selection.setBounds(302,140,137,33);
-    solo.setBounds(447,140,137,33);
-    tone.setBounds(592,140,206,33);
-    noise.setBounds(12,178,137,31);
-    copyReport.setBounds(157,178,165,31);
-    openReport.setBounds(330,178,165,31);
-    closeButton.setBounds(503,178,160,31);
+    solo.setBounds(447,140,170,33);
+    noise.setBounds(625,140,173,33);
+    countdownInput.setBounds(12,178,92,31);
+    countdownSave.setBounds(110,178,100,31);
+    copyReport.setBounds(218,178,165,31);
+    openReport.setBounds(391,178,165,31);
+    closeButton.setBounds(564,178,160,31);
     tableRect=juce::Rectangle<int>(12,219,786,headerHeight+LSpectrumProcessor::bands*lineHeight+2);
 }
 void LSpectrumEditor::mouseDown(const juce::MouseEvent& event)
@@ -306,9 +320,7 @@ void LSpectrumEditor::updatePreview()
 {
     const int band=bandAtRow();
     const auto frequency=(float)LSpectrumProcessor::frequency(band);
-    processor.setToneFrequency(frequency);
     processor.setSoloFrequency(frequency);
-    processor.setToneStereoBand(band);
 }
 void LSpectrumEditor::toggleSelectionMode()
 {
@@ -338,8 +350,7 @@ void LSpectrumEditor::toggleCurrentBand()
 void LSpectrumEditor::refreshScreen()
 {
     selection.setButtonText(selectionMode?"Results (B)":"Bands (B)");
-    solo.setButtonText(processor.isSoloOn()?"Solo ON (S)":"Solo band (S)");
-    tone.setButtonText(processor.isToneOn()?"Sine ON (Enter)":"Sine (Enter)");
+    solo.setButtonText(processor.isSoloOn()?"Solo ON (Enter)":"Solo band (Enter)");
     noise.setButtonText(processor.getNoiseLevel()<=-120.f?"Noise OFF (N)":"Noise ON (N)");
     repaint(tableRect);
 }
@@ -356,32 +367,28 @@ void LSpectrumEditor::startAnalysis()
 }
 void LSpectrumEditor::changeDuration()
 {
-    auto* dialog=new juce::AlertWindow("Analysis duration","Seconds (1 to 600)",juce::MessageBoxIconType::QuestionIcon);
-    dialog->addTextEditor("seconds",juce::String(processor.getDuration()),"Seconds");
-    dialog->addButton("Save",1);
-    dialog->addButton("Cancel",0);
-    dialog->enterModalState(true,
-        juce::ModalCallbackFunction::create([safe=juce::Component::SafePointer<LSpectrumEditor>(this),dialog](int result)
-        {
-            if(safe && result==1)
-            {
-                const auto input=dialog->getTextEditorContents("seconds").trim();
-                if(input.containsOnly("0123456789") && input.isNotEmpty())
-                {
-                    safe->processor.setDuration(input.getIntValue());
-                    safe->announce("Duration: "+juce::String(safe->processor.getDuration())+" seconds");
-                }
-                else safe->announce("Invalid duration. No change made.");
-            }
-            delete dialog;
-            if(safe) safe->grabKeyboardFocus();
-        }),false);
+    // C focuses the existing inline edit control; NVDA speaks its own
+    // accessible name ("countdown") and value. No explicit announcements.
+    countdownInput.setText(juce::String(processor.getDuration()), false);
+    countdownInput.grabKeyboardFocus();
+    countdownInput.selectAll();
 }
-void LSpectrumEditor::toggleTone()
+void LSpectrumEditor::saveCountdown()
 {
-    processor.setTone(!processor.isToneOn());
-    updatePreview(); refreshScreen();
-    announce(processor.isToneOn()?"Sine on, "+currentBandLabel():"Sine off");
+    const auto value=countdownInput.getText().trim();
+    // Use a strict range check. The plugin's duration is always 1..600 s.
+    const int n=value.getIntValue();
+    if(value.isEmpty() || !value.containsOnly("0123456789") || n < 1 || n > 600)
+    {
+        countdownInput.grabKeyboardFocus();
+        countdownInput.selectAll();
+        announce("Countdown must be between 1 and 600 seconds");
+        return;
+    }
+    processor.setDuration(n);
+    countdownInput.setText(juce::String(processor.getDuration()), false);
+    status.setText("Countdown: " + juce::String(processor.getDuration()) + " seconds", juce::dontSendNotification);
+    grabKeyboardFocus();
 }
 void LSpectrumEditor::toggleSolo()
 {
@@ -527,8 +534,10 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
 {
     const int k=key.getKeyCode();
     const auto mods=key.getModifiers();
-    // Esc never cancels a measurement or returns to selection mode: always EXIT.
+    // Never treat arrows typed in the countdown field as table shortcuts.
+    // Escape is the ONLY key that closes the plugin, from every focus context.
     if(k==juce::KeyPress::escapeKey) {requestClose();return true;}
+    if(countdownInput.hasKeyboardFocus(true) || countdownSave.hasKeyboardFocus(true)) return false;
     // REAPER transport is handled by action IDs on the GUI thread, not by
     // sending synthetic keypresses or touching the audio callback.
     if (k==' ' && mods.isCtrlDown())
@@ -562,11 +571,10 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     if(k==juce::KeyPress::pageUpKey){navigate(-8,0);return true;}
     if(k==juce::KeyPress::pageDownKey){navigate(8,0);return true;}
     if(k=='r'||k=='R'){startAnalysis();return true;}
-    if(k=='d'||k=='D'){changeDuration();return true;}
+    if((k=='c'||k=='C') && !mods.isCtrlDown() && !mods.isAltDown()){changeDuration();return true;}
     if(k=='b'||k=='B'){toggleSelectionMode();return true;}
-    if(k=='s'||k=='S'){toggleSolo();return true;}
     if(k=='n'||k=='N'){toggleNoise();return true;}
-    if(k==juce::KeyPress::returnKey){toggleTone();return true;}
+    if(k==juce::KeyPress::returnKey){toggleSolo();return true;}
     if(k=='x'||k=='X')
     {
         if(selectionMode)
@@ -599,7 +607,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     }
     if(k==juce::KeyPress::F1Key || k=='?')
     {
-        announce("Arrows navigate the four columns. Space: REAPER play stop. Control Space: play pause. R: analyze. D: duration. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. S: bandpass solo. Enter: sine. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
+        announce("Arrows navigate the four columns. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown edit. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
         return true;
     }
     if(k==juce::KeyPress::tabKey)

@@ -28,7 +28,7 @@ private:
     void refreshScreen();
     void startAnalysis();
     void changeDuration();
-    void toggleTone();
+    void saveCountdown();
     void toggleSolo();
     void toggleNoise();
     void copy(const juce::String&,const juce::String&);
@@ -40,8 +40,10 @@ private:
     int totalRows() const;
     LSpectrumProcessor& processor;
     juce::Label status, guide;
-    juce::TextButton analyze{"Analyze (R)"}, duration{"Duration (D)"}, selection{"Bands (B)"};
-    juce::TextButton solo{"Solo band (S)"}, tone{"Sine (Enter)"}, noise{"Noise (N)"};
+    juce::TextButton analyze{"Analyze (R)"}, duration{"Countdown (C)"}, selection{"Bands (B)"};
+    juce::TextButton solo{"Solo band (Enter)"}, noise{"Noise (N)"};
+    juce::TextEditor countdownInput;
+    juce::TextButton countdownSave{"Save"};
     juce::TextButton copyReport{"Copy report"}, openReport{"Open report"}, closeButton{"Close (Esc)"};
     juce::Rectangle<int> tableRect;
     int row=0,col=0;
