@@ -5,3 +5,9 @@
 *.user
 *.suo
 .DS_Store
+
+# Local tests / distribution builds
+/dist/
+/tests/test_spectral_mean
+/tests/test_spectral_mean.exe
+*.obj

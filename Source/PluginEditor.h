@@ -1,3 +1,5 @@
+// LSpectrum 4.5dB Analyzer — Copyright (C) 2026 Lo-lo and contributors.
+// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 #include "PluginProcessor.h"
 #include <functional>
@@ -60,6 +62,9 @@ private:
     void finishCountdown();
     bool countdownKeyPressed(const juce::KeyPress&, int control);
     void moveCountdownFocus(int direction, int control);
+    void showAbout();
+    void closeAbout();
+    bool aboutKeyPressed(const juce::KeyPress&, int control);
     void toggleSolo();
     void toggleNoise();
     void copy(const juce::String&,const juce::String&);
@@ -77,7 +82,11 @@ private:
     LSpectrumCountdownButton countdownOk{"OK"};
     LSpectrumCountdownButton countdownCancel{"Cancel"};
     bool countdownActive=false;
-    juce::TextButton copyReport{"Copy report"}, openReport{"Open report"}, closeButton{"Close (Esc)"};
+    juce::TextButton copyReport{"Copy report"}, openReport{"Open report"};
+    juce::TextButton aboutButton{"About (Alt+A)"}, closeButton{"Close (Esc)"};
+    LSpectrumCountdownEdit aboutInfo;
+    LSpectrumCountdownButton aboutOk{"OK"};
+    bool aboutActive=false;
     juce::Rectangle<int> tableRect;
     int row=0,col=0;
     bool selectionMode=false;

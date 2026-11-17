@@ -1,36 +1,24 @@
-LSpectrum 4.5dB Analyzer - TEST11
+LSpectrum 4.5dB Analyzer — 0.99.1 — Comandi rapidi (IT)
 
-INGRESSO: nessun annuncio introduttivo. All'apertura NVDA deve pronunciare solo la cella corrente.
+R: avvia analisi stereo (di default 10 secondi di audio ricevuto).
+C: countdown, campo modificabile (1-600 s).
+Tab / Maiusc+Tab nel countdown: ciclo countdown / OK / Cancel.
+Invio nel campo o su OK: salva. Invio su Cancel o Esc: annulla.
+Frecce: navigate banda, frequenza, differenza sinistra/destra.
+B: selezione bande. Maiusc+Spazio: seleziona/deseleziona.
+X: solo banda corrente selezionata. Canc: tutte le bande.
+Invio nella tabella: solo passabanda stereo 36 dB/ottava per fianco.
+Ctrl+Freccia Su/Giù: livello passabanda (-120..+24 dB), 0 predefinito.
+N: rumore di riferimento; + / -: livello rumore.
+Spazio: Play/Stop REAPER. Ctrl+Spazio: Play/Pausa REAPER.
+1/2/3/4: leggi colonna, doppio tocco: copia.
+Tab in tabella: cella / riga / copia riga.
+Ctrl+C: copia rapporto completo. O/P: apri rapporto salvato.
+F1: aiuto vocale. Alt+A: About accessibile. Esc: chiudi finestra FX.
 
-R = analisi 10 secondi (modificabile)
-C = apri countdown nel campo di testo (1-600 secondi)
-TAB nel countdown = campo countdown -> OK -> Cancel -> campo countdown (ciclo)
-MAIUSC+TAB nel countdown = ciclo inverso
-INVIO nel countdown o su OK = conferma e torna alla tabella
-INVIO su Cancel = annulla e torna alla tabella
-ESC nel countdown = annulla e torna alla tabella (non chiude il plugin)
-Frecce = tabella: banda, frequenza, dB sinistro, dB destro
-Invio (tabella) = passabanda in solo on/off, 36 dB/ottava su entrambi i fianchi
-B = modalità selezione bande
-Maiusc+Spazio (in modalità B) = seleziona/deseleziona banda
-X (in modalità B) = lascia selezionata solo la banda corrente
-Canc = ripristina tutte le 32 bande
-Spazio = Play/Stop REAPER
-Ctrl+Spazio = Play/Pausa REAPER
-N = rumore on/off; +/- = livello rumore
-1, 2, 3, 4 = leggi rispettiva colonna, doppio tocco copia
-Ctrl+C = copia rapporto
-O o P = apri rapporto salvato
-F1 = guida vocale solo su richiesta
-Esc dalla tabella = chiude la finestra FX in base al contenitore REAPER
+Le bande sono differenze dalla curva 4,5 dB/ottava, NON livelli dBFS.
+I frame silenziosi non entrano nella media. Canali silenziosi: No signal.
+Finestra countdown e About: Esc torna alla tabella, non chiude il VST.
 
-Il solo passa esclusivamente il segnale reale contenuto nella banda scelta.
-Quando il solo e il noise sono spenti, il plugin lascia passare l'audio inalterato.
-Il filtro è composto da HP 6° ordine e LP 6° ordine per canale; non è un brickwall.
-
-Ctrl+Freccia su/giu: Guadagno ascolto passabanda da -120 a +24 dB, passo 1 dB. Default 0 dB. Non cambia l'analisi o il segnale normale.
-All'apertura NVDA annuncia soltanto la cella corrente, dopo la disponibilita del focus/UI Automation.
-
-TEST10: rimosso il guadagno interno aggiuntivo di +3 dB; volume del passabanda identico alla TEST8. Conservata la correzione NVDA della TEST9 che elimina il doppio annuncio al rientro.
-
-TEST11: quando il focus è su OK o Cancel, le frecce sono consumate dal plugin e non escono nella FX Chain. Il ritorno dal countdown mantiene banda e colonna originali, senza un messaggio di banda aggiuntivo. Il DSP è invariato rispetto alla TEST10.
+Guida completa: docs/Guida_Italiano.md e docs/English_Guide.md
+Repository: https://github.com/Lo-lo78/LSpectrum

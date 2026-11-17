@@ -1,0 +1,19 @@
+LSpectrum 4.5dB Analyzer
+Version: 0.99.1
+Release date: 18 November 2026
+Author: Lo-lo
+Repository: https://github.com/Lo-lo78/LSpectrum
+
+Accessible 32-band stereo spectrum analyzer VST3 for REAPER.
+Reference: 4.5 dB per octave, near 1 kHz.
+Separate Left/Right differences, non-silent block averaging,
+and 36 dB/octave bandpass audition on each flank.
+
+Ctrl+Up/Down bandpass gain (-120 to +24 dB), default 0 dB.
+Countdown 1 to 600 seconds, default 10 seconds.
+Reference noise; no sine-wave oscillator.
+
+Settings: %APPDATA%\Lo-lo\LSpectrum 4.5dB Analyzer\
+License: GNU Affero General Public License v3.0 only (AGPL-3.0-only)
+JUCE framework: 8.0.15, AGPLv3 licensing option.
+Copyright (C) 2026 Lo-lo and contributors.

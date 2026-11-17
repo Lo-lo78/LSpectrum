@@ -1,5 +1,8 @@
+// LSpectrum 4.5dB Analyzer — Copyright (C) 2026 Lo-lo and contributors.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "SpectralMean.h"
 #include <cmath>
 #include <algorithm>
 
@@ -254,6 +257,7 @@ void LSpectrumProcessor::startScan()
     std::lock_guard<std::mutex> lock(requestMutex);
     resultReady.store(false, std::memory_order_release);
     signalDetected.store(false);
+    for (auto& channel : channelSignalDetected) channel.store(false);
     scanState.store(1, std::memory_order_release);
     wake.notify_one();
 }
@@ -325,11 +329,10 @@ bool LSpectrumProcessor::analyzeFrame(const std::array<float,fftSize>& frame, do
         energy+=(double)sample*sample;
         fftWork[(size_t)i]=sample; // original JSFX computes an unwindowed FFT
     }
+    // Digital silence contributes no spectral measurement. The worker counts
+    // valid frames PER CHANNEL; no artificial -150 dB can contaminate a mean.
     if(energy/fftSize<1.e-14)
-    {
-        for(auto& v:deviations) v+=-150.;
         return false;
-    }
     std::fill(fftWork.begin()+fftSize,fftWork.end(),0.f);
     fft.performRealOnlyForwardTransform(fftWork.data(),false);
     std::array<double,bands> db{};
@@ -364,11 +367,12 @@ void LSpectrumProcessor::workerLoop()
     std::array<std::array<double, bands>, 2> sums {};
     uint64_t r = 0;
     int nFrames = 0, fill = 0;
-    bool foundSignal = false;
+    std::array<int, 2> validFrames {0, 0};
     auto reset = [&]
     {
         for (auto& v : sums) v.fill(0.);
-        nFrames = 0; fill = 0; foundSignal = false;
+        validFrames.fill(0);
+        nFrames = 0; fill = 0;
     };
     for (;;)
     {
@@ -409,8 +413,9 @@ void LSpectrumProcessor::workerLoop()
                     if (fill == fftSize)
                     {
                         for (int ch = 0; ch < 2; ++ch)
-                            foundSignal |= analyzeFrame(frames[(size_t) ch], sampleRateHz.load(),
-                                                        sums[(size_t) ch]);
+                            if (analyzeFrame(frames[(size_t) ch], sampleRateHz.load(),
+                                             sums[(size_t) ch]))
+                                ++validFrames[(size_t) ch];
                         ++nFrames; fill = 0;
                     }
                 }
@@ -425,8 +430,9 @@ void LSpectrumProcessor::workerLoop()
                         {
                             std::fill(frames[(size_t) ch].begin() + fill,
                                       frames[(size_t) ch].end(), 0.f);
-                            foundSignal |= analyzeFrame(frames[(size_t) ch], sampleRateHz.load(),
-                                                        sums[(size_t) ch]);
+                            if (analyzeFrame(frames[(size_t) ch], sampleRateHz.load(),
+                                             sums[(size_t) ch]))
+                                ++validFrames[(size_t) ch];
                         }
                         ++nFrames; fill = 0;
                     }
@@ -435,10 +441,13 @@ void LSpectrumProcessor::workerLoop()
                         for (int ch = 0; ch < 2; ++ch)
                             for (int b = 0; b < bands; ++b)
                             {
+                                const int valid = validFrames[(size_t) ch];
                                 results[(size_t) ch][(size_t) b].store(
-                                    (float) (sums[(size_t) ch][(size_t) b] / nFrames));
+                                    lspectrum::meanDeviation(sums[(size_t) ch][(size_t) b], valid));
                             }
-                        signalDetected.store(foundSignal);
+                        for (int ch = 0; ch < 2; ++ch)
+                            channelSignalDetected[(size_t) ch].store(validFrames[(size_t) ch] > 0);
+                        signalDetected.store(validFrames[0] > 0 || validFrames[1] > 0);
                         // Do not publish an old result over a newly requested scan.
                         {
                             std::lock_guard<std::mutex> guard(requestMutex);
@@ -469,13 +478,22 @@ juce::File LSpectrumProcessor::reportFile() const
 }
 juce::String LSpectrumProcessor::reportText() const
 {
-    juce::String text="LSpectrum 4.5dB Analyzer\nReference: 4.5 dB/oct\n";
+    juce::String text="LSpectrum 4.5dB Analyzer - Version 0.99.1\n";
+    text += "Reference: 4.5 dB/oct; values are spectral deviations, not absolute dBFS\n";
     text += "Captured stereo samples: " + juce::String((juce::int64) scanSamples.load()) + "\n";
     text += "Sample rate: " + juce::String(sampleRateHz.load(), 0) + " Hz\n";
+    text += "Left signal: " + juce::String(channelHadSignal(0) ? "yes" : "no") + "\n";
+    text += "Right signal: " + juce::String(channelHadSignal(1) ? "yes" : "no") + "\n";
     text += "Band | Frequency | Left diff dB | Right diff dB\n";
-    for(int b=0;b<bands;++b) if(selected[(size_t)b].load())
-        text+=juce::String(b+1)+" | "+juce::String(frequency(b),1)+" Hz | "
-            +juce::String(getResult(b,0),2)+" | "+juce::String(getResult(b,1),2)+"\n";
+    for (int band=0; band<bands; ++band)
+        if (selected[(size_t) band].load())
+        {
+            text += juce::String(band+1) + " | " + juce::String(frequency(band),1) + " Hz | ";
+            text += channelHadSignal(0) ? juce::String(getResult(band,0),2) : juce::String("No signal");
+            text += " | ";
+            text += channelHadSignal(1) ? juce::String(getResult(band,1),2) : juce::String("No signal");
+            text += "\n";
+        }
     return text;
 }
 bool LSpectrumProcessor::saveReport() const
@@ -511,8 +529,21 @@ void LSpectrumProcessor::loadLastResult()
 {
     const auto file=reportFile(); if(!file.existsAsFile()) return;
     int loaded=0;
+    bool leftSignal = true, rightSignal = true;
+    bool leftFound = false, rightFound = false;
     for (const auto& line : juce::StringArray::fromLines(file.loadFileAsString()))
     {
+        const auto trimmed = line.trim();
+        if (trimmed.startsWithIgnoreCase("Left signal:"))
+        {
+            leftSignal = trimmed.fromFirstOccurrenceOf(":", false, false).trim().equalsIgnoreCase("yes");
+            leftFound = true;
+        }
+        if (trimmed.startsWithIgnoreCase("Right signal:"))
+        {
+            rightSignal = trimmed.fromFirstOccurrenceOf(":", false, false).trim().equalsIgnoreCase("yes");
+            rightFound = true;
+        }
         auto parts=juce::StringArray::fromTokens(line,"|","");
         if(parts.size()!=4 && parts.size()!=3) continue;
         const int band=parts[0].trim().getIntValue();
@@ -524,7 +555,9 @@ void LSpectrumProcessor::loadLastResult()
         ++loaded;
     }
     resultReady.store(loaded>0);
-    signalDetected.store(loaded>0);
+    channelSignalDetected[0].store(loaded>0 && (!leftFound || leftSignal));
+    channelSignalDetected[1].store(loaded>0 && (!rightFound || rightSignal));
+    signalDetected.store(channelHadSignal(0) || channelHadSignal(1));
 }
 void LSpectrumProcessor::getStateInformation(juce::MemoryBlock& dest)
 {
@@ -539,6 +572,8 @@ void LSpectrumProcessor::getStateInformation(juce::MemoryBlock& dest)
     xml.setAttribute("SoloFreq",(double)soloFrequency.load());
     xml.setAttribute("HasResult",resultReady.load());
     xml.setAttribute("HadSignal",signalDetected.load());
+    xml.setAttribute("LeftHadSignal",channelHadSignal(0));
+    xml.setAttribute("RightHadSignal",channelHadSignal(1));
     for(int b=0;b<bands;++b)
     {
         xml.setAttribute("Band"+juce::String(b+1),selected[(size_t)b].load());
@@ -571,6 +606,10 @@ void LSpectrumProcessor::setStateInformation(const void* data,int size)
     if(getSelectedCount()==0) for(auto& s:selected) s.store(true);
     resultReady.store(xml->getBoolAttribute("HasResult",false));
     signalDetected.store(xml->getBoolAttribute("HadSignal",resultReady.load()));
+    // Older projects did not store per-channel silence flags. Assume each
+    // channel was valid when loading their legacy spectrum for compatibility.
+    channelSignalDetected[0].store(xml->getBoolAttribute("LeftHadSignal",resultReady.load()));
+    channelSignalDetected[1].store(xml->getBoolAttribute("RightHadSignal",resultReady.load()));
 }
 juce::AudioProcessorEditor* LSpectrumProcessor::createEditor() {return new LSpectrumEditor(*this);}
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() {return new LSpectrumProcessor();}

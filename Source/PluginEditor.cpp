@@ -1,3 +1,5 @@
+// LSpectrum 4.5dB Analyzer — Copyright (C) 2026 Lo-lo and contributors.
+// SPDX-License-Identifier: AGPL-3.0-only
 #include "PluginEditor.h"
 #include "ScreenReaderAnnouncer.h"
 #include <cmath>
@@ -97,7 +99,7 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     status.setColour(juce::Label::textColourId, juce::Colours::white);
     status.setText({}, juce::dontSendNotification);
     lastResultStatus=p.hasResult();
-    for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&copyReport,&openReport,&closeButton})
+    for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&copyReport,&openReport,&aboutButton,&closeButton})
     {
         addAndMakeVisible(*button);
         button->setMouseClickGrabsKeyboardFocus(false);
@@ -151,6 +153,27 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
         grabKeyboardFocus();
     };
     closeButton.onClick=[this]{requestClose();};
+    aboutButton.onClick=[this]{showAbout();};
+    addChildComponent(aboutInfo);
+    addChildComponent(aboutOk);
+    aboutInfo.setName("About LSpectrum");
+    aboutInfo.setDescription({});
+    aboutInfo.setMultiLine(true, true);
+    aboutInfo.setReadOnly(true);
+    aboutInfo.setScrollbarsShown(true);
+    aboutInfo.setWantsKeyboardFocus(true);
+    aboutInfo.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff142331));
+    aboutInfo.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+    aboutInfo.onCountdownKey=[this](const juce::KeyPress& k)
+    {
+        return aboutKeyPressed(k, 0);
+    };
+    aboutOk.setWantsKeyboardFocus(true);
+    aboutOk.onCountdownKey=[this](const juce::KeyPress& k)
+    {
+        return aboutKeyPressed(k, 1);
+    };
+    aboutOk.onClick=[this]{closeAbout();};
     status.addKeyListener(this);
     updatePreview(); refreshScreen(); rememberPosition(); startTimerHz(8);
 }
@@ -248,8 +271,8 @@ void LSpectrumEditor::paint(juce::Graphics& graphics)
             if(c==0) value=juce::String(band+1)+(selectionMode?(processor.getBandSelected(band)?" *":""):"");
             if(c==1) value=juce::String(LSpectrumProcessor::frequency(band),1);
             if(c==2) value=selectionMode?(processor.getBandSelected(band)?"selected":"not selected")
-                :(processor.hasResult()?juce::String(processor.getResult(band,0),2):"--");
-            if(c==3) value=selectionMode?"":(processor.hasResult()?juce::String(processor.getResult(band,1),2):"--");
+                :(!processor.hasResult()?"--":(!processor.channelHadSignal(0)?"No signal":juce::String(processor.getResult(band,0),2)));
+            if(c==3) value=selectionMode?"":(!processor.hasResult()?"--":(!processor.channelHadSignal(1)?"No signal":juce::String(processor.getResult(band,1),2)));
             graphics.drawText(value,x+8,top+1,widths[c]-12,lineHeight-2,juce::Justification::centredLeft);
             x+=widths[c];
         }
@@ -268,9 +291,12 @@ void LSpectrumEditor::resized()
     countdownInput.setBounds(12,128,92,31);
     countdownOk.setBounds(110,128,100,31);
     countdownCancel.setBounds(218,128,100,31);
-    copyReport.setBounds(326,128,145,31);
-    openReport.setBounds(479,128,145,31);
-    closeButton.setBounds(632,128,166,31);
+    copyReport.setBounds(326,128,130,31);
+    openReport.setBounds(464,128,125,31);
+    aboutButton.setBounds(597,128,100,31);
+    closeButton.setBounds(705,128,93,31);
+    aboutInfo.setBounds(12,169,786,487);
+    aboutOk.setBounds(12,666,130,31);
     tableRect=juce::Rectangle<int>(12,169,786,headerHeight+LSpectrumProcessor::bands*lineHeight+2);
 }
 void LSpectrumEditor::mouseDown(const juce::MouseEvent& event)
@@ -314,7 +340,11 @@ juce::String LSpectrumEditor::fieldText(int column) const
     if(column==1) return currentBandLabel();
     if(selectionMode) return processor.getBandSelected(band)?"Selected":"Not selected";
     if(!processor.hasResult()) return "No results yet";
-    return juce::String(column==2?"Left, ":"Right, ")+juce::String(processor.getResult(band,column-2),2)+" dB";
+    const int channel = column - 2;
+    if (!processor.channelHadSignal(channel))
+        return juce::String(column==2 ? "Left, " : "Right, ") + "no signal";
+    return juce::String(column==2?"Left, ":"Right, ")
+         +juce::String(processor.getResult(band,channel),2)+" dB";
 }
 juce::String LSpectrumEditor::cellText() const
 {
@@ -327,8 +357,7 @@ juce::String LSpectrumEditor::rowText() const
     juce::String text="Band "+juce::String(band+1)+", "+currentBandLabel();
     if(selectionMode) return text+", "+(processor.getBandSelected(band)?"selected":"not selected");
     if(!processor.hasResult()) return text+", no results yet";
-    return text+", left "+juce::String(processor.getResult(band,0),2)
-        +" dB, right "+juce::String(processor.getResult(band,1),2)+" dB";
+    return text+", " + fieldText(2) + ", " + fieldText(3);
 }
 void LSpectrumEditor::rememberPosition()
 {
@@ -506,6 +535,71 @@ void LSpectrumEditor::saveCountdown()
     status.setText("Countdown: " + juce::String(processor.getDuration()) + " seconds", juce::dontSendNotification);
     finishCountdown();
 }
+void LSpectrumEditor::showAbout()
+{
+    if (countdownActive || aboutActive) return;
+    aboutActive = true;
+    initialLocationPending = false;
+    // No automatic speech: NVDA reads the focused, accessible text editor.
+    aboutInfo.setText(
+        "LSpectrum 4.5dB Analyzer\n"
+        "Version 0.99.1\n"
+        "Release date: 18 November 2026\n"
+        "Author: Lo-lo\n"
+        "Repository: https://github.com/Lo-lo78/LSpectrum\n\n"
+        "Accessible 32-band stereo spectrum analyzer for REAPER.\n"
+        "Reference: 4.5 dB per octave, near 1 kHz.\n"
+        "Independent left and right spectral deviations (not dBFS).\n"
+        "36 dB/octave audition bandpass on each flank.\n"
+        "FFT and sample collection on separate threads.\n"
+        "Noise reference generator. No sine oscillator.\n"
+        "Settings: AppData/Roaming/Lo-lo/LSpectrum 4.5dB Analyzer\n\n"
+        "Keyboard: F1 help, R scan, C countdown, Enter bandpass, B band selection,\n"
+        "Ctrl+Up/Down bandpass gain, Space transport, Alt+A About.\n"
+        "Tab moves to OK. Escape closes About and returns to the table.\n\n"
+        "License: GNU Affero General Public License v3.0 (AGPL-3.0-only).\n"
+        "Uses JUCE 8.0.15, also available under AGPLv3.\n"
+        "Copyright (C) 2026 Lo-lo and contributors.", false);
+    aboutInfo.setVisible(true);
+    aboutOk.setVisible(true);
+    aboutInfo.grabKeyboardFocus();
+    aboutInfo.setCaretPosition(0);
+}
+void LSpectrumEditor::closeAbout()
+{
+    if (!aboutActive) return;
+    aboutActive = false;
+    setName(cellText());
+    setTitle(cellText());
+    aboutInfo.setVisible(false);
+    aboutOk.setVisible(false);
+    grabKeyboardFocus();
+}
+bool LSpectrumEditor::aboutKeyPressed(const juce::KeyPress& key, int control)
+{
+    if (!aboutActive) return false;
+    const int k = key.getKeyCode();
+    if (k == juce::KeyPress::escapeKey || k == juce::KeyPress::returnKey)
+    {
+        closeAbout();
+        return true;
+    }
+    if (k == juce::KeyPress::tabKey)
+    {
+        const int newControl = 1 - control;
+        if (newControl == 0) aboutInfo.grabKeyboardFocus();
+        else aboutOk.grabKeyboardFocus();
+        return true;
+    }
+    // The OK button consumes all other keys, preventing escape to the host.
+    if (control == 1)
+    {
+        if (k == ' ') closeAbout();
+        return true;
+    }
+    // In the read-only About text, arrows scroll as normal text navigation.
+    return false;
+}
 void LSpectrumEditor::toggleSolo()
 {
     processor.setSolo(!processor.isSoloOn());
@@ -531,7 +625,7 @@ void LSpectrumEditor::timerCallback()
     // First-open/re-open NVDA entry: only try after JUCE's peer and keyboard
     // focus are established, and retry silently if the native UIA provider
     // has not been created yet. No introduction or help text is ever spoken.
-    if (!countdownActive && initialLocationPending && processor.needsFirstEditorCellAnnouncement()
+    if (!countdownActive && !aboutActive && initialLocationPending && processor.needsFirstEditorCellAnnouncement()
         && isShowing() && getPeer() != nullptr)
     {
         const auto elapsed = juce::Time::getMillisecondCounter() - initialFocusRequestedMs;
@@ -668,6 +762,15 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
 {
     const int k=key.getKeyCode();
     const auto mods=key.getModifiers();
+    // The About panel is non-modal and traps keys locally, returning to the
+    // exact previously selected spectrum cell on Escape/OK.
+    if (aboutActive)
+    {
+        if (aboutInfo.hasKeyboardFocus(true)) return aboutKeyPressed(key, 0);
+        if (aboutOk.hasKeyboardFocus(true)) return aboutKeyPressed(key, 1);
+        aboutInfo.grabKeyboardFocus();
+        return true;
+    }
     // While C is active, no host/table hotkey is allowed through this editor.
     // Normal countdown keys are handled by the input/button subclasses first.
     if (countdownActive)
@@ -730,6 +833,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     if(k==juce::KeyPress::endKey){navigate(totalRows()-1-row,0);return true;}
     if(k==juce::KeyPress::pageUpKey){navigate(-8,0);return true;}
     if(k==juce::KeyPress::pageDownKey){navigate(8,0);return true;}
+    if ((k=='a'||k=='A') && mods.isAltDown()) {showAbout();return true;}
     if(k=='r'||k=='R'){startAnalysis();return true;}
     if((k=='c'||k=='C') && !mods.isCtrlDown() && !mods.isAltDown()){changeDuration();return true;}
     if(k=='b'||k=='B'){toggleSelectionMode();return true;}
@@ -767,7 +871,7 @@ bool LSpectrumEditor::handleKeyPress(const juce::KeyPress& key)
     }
     if(k==juce::KeyPress::F1Key || k=='?')
     {
-        announce("Arrows navigate the four columns. Control Up and Down: bandpass level, minus 120 to plus 24 dB. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown. Tab cycles edit, OK, Cancel; Shift Tab goes backward. Enter acts on the focused control, Escape cancels and returns to the table. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
+        announce("Alt A: About. Arrows navigate the four columns. Control Up and Down: bandpass level, minus 120 to plus 24 dB. Space: REAPER play stop. Control Space: play pause. R: analyze. C: countdown. Tab cycles edit, OK, Cancel; Shift Tab goes backward. Enter acts on the focused control, Escape cancels and returns to the table. B: band selection. Shift Space: select band. X: only this band. Delete: all bands. Enter: bandpass solo. N: noise. Plus and minus: noise level. 1 to 4: read columns. Control C: copy report. O or P: open report. Escape: close plugin window.");
         return true;
     }
     if(k==juce::KeyPress::tabKey)

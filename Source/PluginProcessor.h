@@ -1,3 +1,5 @@
+// LSpectrum 4.5dB Analyzer — Copyright (C) 2026 Lo-lo and contributors.
+// SPDX-License-Identifier: AGPL-3.0-only
 #pragma once
 #include <JuceHeader.h>
 #include <array>
@@ -44,6 +46,12 @@ public:
     bool hasScanError() const { return getScanState() == 4; }
     bool hasResult() const { return resultReady.load(std::memory_order_acquire); }
     bool hadSignal() const { return signalDetected.load(); }
+    bool channelHadSignal(int channel) const
+    {
+        return (channel >= 0 && channel < 2)
+            ? channelSignalDetected[(size_t) channel].load(std::memory_order_acquire)
+            : false;
+    }
     uint64_t getCapturedSamples() const { return scanSamples.load(); }
     int getRemainingSeconds() const;
     float getResult(int b, int channel) const { return results[(size_t)channel][(size_t)b].load(); }
@@ -115,6 +123,7 @@ private:
     std::atomic<bool> editorSelectionMode {false};
     std::atomic<bool> firstEditorCellAnnounced {false}; // Runtime only, never saved.
     std::atomic<bool> resultReady {false}, quit {false}, signalDetected {false};
+    std::array<std::atomic<bool>, 2> channelSignalDetected {{false, false}};
     std::atomic<int> scanState {0};
     std::atomic<uint64_t> scanSamples {0}, scanTarget {441000};
     std::atomic<double> sampleRateHz {44100.0};
