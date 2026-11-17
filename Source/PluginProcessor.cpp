@@ -213,7 +213,9 @@ void LSpectrumProcessor::loadSettings()
 void LSpectrumProcessor::loadLastResult()
 {
     const auto file=reportFile(); if(!file.existsAsFile()) return;
-    for(auto line:file.loadFileAsString().splitIntoLines())
+    // JUCE 8 provides StringArray::fromLines(), not String::splitIntoLines().
+    const auto lines = juce::StringArray::fromLines(file.loadFileAsString());
+    for (const auto& line : lines)
     {
         auto parts=juce::StringArray::fromTokens(line,"|","");
         if(parts.size()!=3) continue;
