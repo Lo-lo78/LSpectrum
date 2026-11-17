@@ -60,6 +60,18 @@ public:
     int getEditorBand() const noexcept { return editorBand.load(std::memory_order_acquire); }
     int getEditorColumn() const noexcept { return editorColumn.load(std::memory_order_acquire); }
     bool getEditorSelectionMode() const noexcept { return editorSelectionMode.load(std::memory_order_acquire); }
+    // One explicit UIA entry announcement per live plugin instance.
+    // REAPER/NVDA already announces the editor's accessible name on later openings;
+    // announcing it again here produced two identical spoken cells.
+    // Not serialized: a newly created instance still needs its first-focus announcement.
+    bool needsFirstEditorCellAnnouncement() const noexcept
+    {
+        return !firstEditorCellAnnounced.load(std::memory_order_acquire);
+    }
+    void markFirstEditorCellAnnounced() noexcept
+    {
+        firstEditorCellAnnounced.store(true, std::memory_order_release);
+    }
 
     void setNoiseLevel(float db);
     float getNoiseLevel() const { return noiseDb.load(); }
@@ -101,6 +113,7 @@ private:
     std::atomic<int> duration {10};
     std::atomic<int> editorBand {0}, editorColumn {0};
     std::atomic<bool> editorSelectionMode {false};
+    std::atomic<bool> firstEditorCellAnnounced {false}; // Runtime only, never saved.
     std::atomic<bool> resultReady {false}, quit {false}, signalDetected {false};
     std::atomic<int> scanState {0};
     std::atomic<uint64_t> scanSamples {0}, scanTarget {441000};

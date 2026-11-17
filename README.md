@@ -1,17 +1,23 @@
-# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST8
+# LSpectrum 4.5dB Analyzer — VST3 JUCE TEST9
 
 **Repository:** https://github.com/Lo-lo78/LSpectrum
 
 VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separato, 32 bande logaritmiche, riferimento 4,5 dB per ottava, analisi separata L/R, generatore di rumore e ascolto della banda in solo. L'audio in ingresso attraversa il plugin senza alterazioni quando noise e solo sono disattivati.
 
-## Modifiche TEST8
+## Modifiche TEST9
+
+- **Annuncio iniziale una sola volta:** la prima apertura di una nuova istanza conserva il meccanismo di attesa del provider UI Automation e annuncia la cella iniziale (Band 1 se non è stato salvato un altro cursore). Il primo annuncio completato viene ricordato solo durante la vita dell’istanza. Alle successive aperture non viene ripetuto via notifica: NVDA riceve la posizione dalla normale messa a fuoco dell’editor. Per le istanze già salvate, la posizione continua a essere ripristinata dal progetto.
+- **+3 dB di makeup interno del solo:** il passabanda filtrato è amplificato di 3 dB rispetto alla TEST8, a parità di valore mostrato. **0 dB visualizzati restano 0 dB** (offset dell'utente); la somma effettiva in modalità solo è +3 dB. Con -120 dB selezionati il filtro rimane muto. Range del controllo invariato e nessuna migrazione delle impostazioni.
+- **Compatibilità:** DSP a 36 dB/ottava, analisi, rumore, scorciatoie, dati in Roaming e formato di progetto invariati.
+
+## Informazioni TEST8 (conservate)
 
 - **Guadagno dell'ascolto passabanda:** Ctrl+Freccia su/giù modifica di 1 dB il livello del solo fra **-120 e +24 dB** (default 0 dB); rampa di 20 ms, nessun effetto sull'audio normale o sui dati FFT. Valore salvato in `settings.xml` e nello stato di ogni istanza REAPER, compatibile con i progetti TEST7 precedenti.
 - **Primo ingresso NVDA:** il componente editor espone come nome e titolo accessibile la **cella corrente** invece del titolo ripetitivo. L'annuncio avviene quando finestra, focus e provider UI Automation sono realmente pronti, con ritentativi silenziosi se il provider non è ancora disponibile. Nessuna frase introduttiva. Il nome del prodotto VST3 rimane invariato per REAPER. REAPER può comunque annunciare il proprio titolo FX Chain: il plugin controlla soltanto il nome accessibile del proprio editor.
 - **Visivo:** al posto del titolo statico viene mostrata la cella corrente, e sotto il guadagno del passabanda.
 - **DSP confermato:** passabanda di sesto ordine su ciascun lato (36 dB/ottava), stereo, crossfade tra bande di 25 ms, noise, FFT su thread separato, comandi e tabella invariati.
 
-**Attenzione ai picchi:** +24 dB equivale a un guadagno di circa 15,85 volte in ampiezza. Senza limiter si può arrivare al clipping nelle tracce seguenti.
+**Attenzione ai picchi:** con il makeup interno, +24 dB mostrati corrispondono a +27 dB effettivi sul segnale filtrato. Non è presente un limiter: i successivi effetti potrebbero ricevere picchi superiori a 0 dBFS.
 
 ## Comandi
 
@@ -42,7 +48,7 @@ VST3 stereo per REAPER, migrato da JSFX/Lua. Acquisizione e FFT su thread separa
 Copiare tutti i file **direttamente nella radice del repository locale**, sovrascrivendo quelli precedenti ma senza eliminare `.git`. Include `.github/workflows/build-windows.yml` per Windows 2022 e JUCE 8.0.15.
 
 ```cmd
-git add . && git commit -m "LSpectrum TEST8 audition gain and first-focus NVDA" && git push
+git add . && git commit -m "LSpectrum TEST9 NVDA entry once and solo makeup gain" && git push
 ```
 
 **Stato:** sorgenti controllati staticamente, con verifica numerica indipendente delle pendenze. La compilazione Windows e il collaudo in REAPER/NVDA restano da effettuare su GitHub Actions.

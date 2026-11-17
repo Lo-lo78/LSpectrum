@@ -25,3 +25,5 @@ Il filtro è composto da HP 6° ordine e LP 6° ordine per canale; non è un bri
 
 Ctrl+Freccia su/giu: Guadagno ascolto passabanda da -120 a +24 dB, passo 1 dB. Default 0 dB. Non cambia l'analisi o il segnale normale.
 All'apertura NVDA annuncia soltanto la cella corrente, dopo la disponibilita del focus/UI Automation.
+
+TEST9: +3 dB di guadagno interno al passabanda (0 dB mostrati restano 0); NVDA annuncia esplicitamente la cella solo al primo caricamento dell’istanza, evitando il doppio messaggio al rientro.

@@ -152,8 +152,12 @@ void LSpectrumEditor::visibilityChanged()
         // on the FIRST editor opening the provider may not yet exist.
         setName(cellText());
         setTitle(cellText());
-        initialLocationAnnounced = false;
-        initialLocationPending = true;
+        // The manual notification fixes the FIRST visit, when Windows UIA
+        // has not necessarily announced the accessible cell name yet.
+        // On subsequent visits REAPER/NVDA announces that focus name itself;
+        // do not add another UiaRaiseNotificationEvent for the same cell.
+        initialLocationAnnounced = !processor.needsFirstEditorCellAnnouncement();
+        initialLocationPending = !initialLocationAnnounced;
         initialFocusRetryDone = false;
         initialFocusRequestedMs = juce::Time::getMillisecondCounter();
         grabKeyboardFocus();
@@ -166,7 +170,8 @@ void LSpectrumEditor::visibilityChanged()
 }
 void LSpectrumEditor::focusGained(FocusChangeType)
 {
-    if (isShowing() && !initialLocationAnnounced)
+    if (isShowing() && !initialLocationAnnounced
+        && processor.needsFirstEditorCellAnnouncement())
     {
         initialLocationPending = true;
         initialFocusRequestedMs = juce::Time::getMillisecondCounter();
@@ -320,6 +325,9 @@ void LSpectrumEditor::announceCell()
     // accessibility provider and the UIA notification has been accepted.
     if (lspectrum::announceToActiveScreenReader(*this, cellText(), true))
     {
+        // This explicit notification is required only once per VST instance.
+        // On re-entry the native accessibility focus provides the location.
+        processor.markFirstEditorCellAnnounced();
         initialLocationAnnounced = true;
         initialLocationPending = false;
     }
@@ -433,7 +441,8 @@ void LSpectrumEditor::timerCallback()
     // First-open/re-open NVDA entry: only try after JUCE's peer and keyboard
     // focus are established, and retry silently if the native UIA provider
     // has not been created yet. No introduction or help text is ever spoken.
-    if (initialLocationPending && isShowing() && getPeer() != nullptr)
+    if (initialLocationPending && processor.needsFirstEditorCellAnnouncement()
+        && isShowing() && getPeer() != nullptr)
     {
         const auto elapsed = juce::Time::getMillisecondCounter() - initialFocusRequestedMs;
         // Try one delayed focus acquisition only if REAPER has not yet given
