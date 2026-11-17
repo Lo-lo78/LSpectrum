@@ -1,15 +1,24 @@
-LSpectrum 4.5dB Analyzer — TEST6 — Guida rapida NVDA
+LSpectrum 4.5dB Analyzer - TEST7
 
-Navigazione: frecce, Home, End, Pagina su/giù. Le quattro colonne sono Banda, Hz, dB sinistro, dB destro. La posizione resta memorizzata quando chiudi e riapri il plugin.
-Spazio: Play/Stop REAPER. Ctrl+Spazio: Play/Pausa REAPER.
-R: avvia nuova analisi stereo sull'audio che arriva al plugin.
-C: attiva subito il campo di modifica "countdown". Inserisci 1..600 secondi; Invio o pulsante Save per confermare. Le frecce nel campo non escono dal plugin e non scorrono le bande. Non si apre una seconda finestra.
-Invio (nella tabella): attiva/disattiva il passabanda stereo sulla frequenza della banda corrente. La sinusoide e il suo generatore sono stati rimossi.
-B: selezione bande, Maiusc+Spazio per scegliere, X solo quella corrente, Canc tutte.
-N: rumore acceso/spento. + e - regolano il livello del rumore.
-Ctrl+C copia il rapporto completo. O/P apre il file dei risultati.
-1–4 legge la colonna, doppio tocco copia. Tab rapido legge cella/riga e copia riga. F1 aiuto.
-Esc: esce dalla finestra del VST, non dalla sola modifica del countdown.
+INGRESSO: nessun annuncio introduttivo. All'apertura NVDA deve pronunciare solo la cella corrente.
 
-Dati in %%APPDATA%%\Lo-lo\LSpectrum 4.5dB Analyzer
-Repository https://github.com/Lo-lo78/LSpectrum
+R = analisi 10 secondi (modificabile)
+C = vai al campo countdown; Invio salva (1-600 secondi)
+Frecce = tabella: banda, frequenza, dB sinistro, dB destro
+Invio (tabella) = passabanda in solo on/off, 36 dB/ottava su entrambi i fianchi
+B = modalità selezione bande
+Maiusc+Spazio (in modalità B) = seleziona/deseleziona banda
+X (in modalità B) = lascia selezionata solo la banda corrente
+Canc = ripristina tutte le 32 bande
+Spazio = Play/Stop REAPER
+Ctrl+Spazio = Play/Pausa REAPER
+N = rumore on/off; +/- = livello rumore
+1, 2, 3, 4 = leggi rispettiva colonna, doppio tocco copia
+Ctrl+C = copia rapporto
+O o P = apri rapporto salvato
+F1 = guida vocale solo su richiesta
+Esc = chiude la finestra FX in base al contenitore REAPER
+
+Il solo passa esclusivamente il segnale reale contenuto nella banda scelta.
+Quando il solo e il noise sono spenti, il plugin lascia passare l'audio inalterato.
+Il filtro è composto da HP 6° ordine e LP 6° ordine per canale; non è un brickwall.

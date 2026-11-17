@@ -104,8 +104,37 @@ private:
     std::atomic<float> soloFrequency {440.f};
     std::atomic<bool> soloEnabled {false};
     NoiseState noiseL, noiseR;
-    juce::dsp::StateVariableTPTFilter<float> soloL, soloR;
-    float lastSoloCutoff=0.f, soloMix=0.f;
+    // 36 dB/oct on EACH flank: 6th-order Butterworth high-pass +
+    // 6th-order Butterworth low-pass (3 biquads for each edge).
+    // Coefficients are calculated only in prepareToPlay, never on audio thread.
+    struct BiquadCoefficients
+    {
+        double b0=1., b1=0., b2=0., a1=0., a2=0.;
+    };
+    struct BiquadState
+    {
+        double z1=0., z2=0.;
+        double process(double x, const BiquadCoefficients& c) noexcept
+        {
+            const double y = c.b0*x + z1;
+            z1 = c.b1*x - c.a1*y + z2;
+            z2 = c.b2*x - c.a2*y;
+            return y;
+        }
+    };
+    static constexpr int soloStages = 6;
+    using StageCoefficients = std::array<BiquadCoefficients, soloStages>;
+    using StageStates = std::array<BiquadState, soloStages>;
+    std::array<StageCoefficients, bands> soloCoefficients {};
+    std::array<bool, bands> bandAudible {};
+    // Two banks allow a short click-free crossfade when moving to another band.
+    std::array<std::array<StageStates, 2>, 2> soloStates {};
+    int activeSoloBank = 0, activeSoloBand = -1, fadingSoloBand = -1;
+    float soloBandBlend = 1.f, soloMix = 0.f, lastSoloFrequency = -1.f;
+    bool lastSoloEnabled = false;
+    void prepareSoloFilters(double sampleRate);
+    void resetSoloBank(int bank) noexcept;
+    double processSoloBand(int bank, int channel, int band, double x) noexcept;
     std::thread worker;
     std::condition_variable wake;
     std::mutex wakeMutex;

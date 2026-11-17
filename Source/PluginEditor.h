@@ -39,7 +39,7 @@ private:
     int bandAtRow() const;
     int totalRows() const;
     LSpectrumProcessor& processor;
-    juce::Label status, guide;
+    juce::Label status;
     juce::TextButton analyze{"Analyze (R)"}, duration{"Countdown (C)"}, selection{"Bands (B)"};
     juce::TextButton solo{"Solo band (Enter)"}, noise{"Noise (N)"};
     juce::TextEditor countdownInput;

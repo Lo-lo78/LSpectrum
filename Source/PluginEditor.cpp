@@ -55,7 +55,7 @@ bool LSpectrumEditor::sendReaperTransportCommand(bool playPause)
 LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
-    setSize(810,830);
+    setSize(810,790);
     setWantsKeyboardFocus(true);
     setMouseClickGrabsKeyboardFocus(true);
     // Keep the accessible label tied to the CURRENT cell, never to an
@@ -84,15 +84,14 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
         row = nearestRow;
     }
     setTitle(cellText());
-    for(auto* label : {&status,&guide})
-    {
-        addAndMakeVisible(*label);
-        label->setJustificationType(juce::Justification::centredLeft);
-        label->setColour(juce::Label::textColourId,juce::Colours::white);
-    }
-    guide.setText("Arrows: table   Space: play/stop   Ctrl+Space: play/pause   Enter: bandpass   C: countdown   R: analyze   F1: help",juce::dontSendNotification);
-    status.setText(p.hasResult() ? "Previous result available. Press R for a new scan."
-                                 : "Ready. Start playback in REAPER, then press R to analyze " + juce::String(p.getDuration()) + " seconds.",juce::dontSendNotification);
+    // No introductory text for NVDA/REAPER when landing in the FX chain.
+    // Progress status is drawn for sighted users, but is not part of the
+    // accessibility tree; only the current table cell is announced on entry.
+    addAndMakeVisible(status);
+    status.setAccessible(false);
+    status.setJustificationType(juce::Justification::centredLeft);
+    status.setColour(juce::Label::textColourId, juce::Colours::white);
+    status.setText({}, juce::dontSendNotification);
     lastResultStatus=p.hasResult();
     for(auto* button : {&analyze,&duration,&selection,&solo,&noise,&countdownSave,&copyReport,&openReport,&closeButton})
     {
@@ -135,7 +134,6 @@ LSpectrumEditor::LSpectrumEditor(LSpectrumProcessor& p)
     };
     closeButton.onClick=[this]{requestClose();};
     status.addKeyListener(this);
-    guide.addKeyListener(this);
     updatePreview(); refreshScreen(); rememberPosition(); startTimerHz(8);
 }
 LSpectrumEditor::~LSpectrumEditor()
@@ -230,19 +228,18 @@ void LSpectrumEditor::paint(juce::Graphics& graphics)
 }
 void LSpectrumEditor::resized()
 {
-    status.setBounds(12,68,786,27);
-    guide.setBounds(12,100,786,26);
-    analyze.setBounds(12,140,137,33);
-    duration.setBounds(157,140,137,33);
-    selection.setBounds(302,140,137,33);
-    solo.setBounds(447,140,170,33);
-    noise.setBounds(625,140,173,33);
-    countdownInput.setBounds(12,178,92,31);
-    countdownSave.setBounds(110,178,100,31);
-    copyReport.setBounds(218,178,165,31);
-    openReport.setBounds(391,178,165,31);
-    closeButton.setBounds(564,178,160,31);
-    tableRect=juce::Rectangle<int>(12,219,786,headerHeight+LSpectrumProcessor::bands*lineHeight+2);
+    status.setBounds(12,64,786,21);
+    analyze.setBounds(12,88,137,33);
+    duration.setBounds(157,88,137,33);
+    selection.setBounds(302,88,137,33);
+    solo.setBounds(447,88,170,33);
+    noise.setBounds(625,88,173,33);
+    countdownInput.setBounds(12,128,92,31);
+    countdownSave.setBounds(110,128,100,31);
+    copyReport.setBounds(218,128,165,31);
+    openReport.setBounds(391,128,165,31);
+    closeButton.setBounds(564,128,160,31);
+    tableRect=juce::Rectangle<int>(12,169,786,headerHeight+LSpectrumProcessor::bands*lineHeight+2);
 }
 void LSpectrumEditor::mouseDown(const juce::MouseEvent& event)
 {

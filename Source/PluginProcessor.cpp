@@ -38,16 +38,83 @@ bool LSpectrumProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
     return layout.getMainInputChannelSet() == juce::AudioChannelSet::stereo()
         && layout.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
 }
+void LSpectrumProcessor::prepareSoloFilters(double rate)
+{
+    // 6th-order analog Butterworth section Qs, implemented as three
+    // independent digital biquads for each HP and LP flank.
+    constexpr std::array<double, 3> butterworthQ {0.5176380902050415,
+                                                    0.7071067811865476,
+                                                    1.9318516525781366};
+    const double top = 0.475 * rate;
+    const double maxLower = 0.455 * rate;
+    const double bandRatio = std::pow(hiHz / loHz, 1.0 / bands);
+
+    auto makeBiquad = [rate](double cutoff, double q, bool highPass) noexcept
+    {
+        const double w = juce::MathConstants<double>::twoPi * cutoff / rate;
+        const double cosW = std::cos(w), sinW = std::sin(w);
+        const double alpha = sinW / (2.0 * q);
+        const double a0 = 1.0 + alpha;
+        const double num = highPass ? (1.0 + cosW) * 0.5 : (1.0 - cosW) * 0.5;
+        BiquadCoefficients c;
+        c.b0 = num / a0;
+        c.b1 = (highPass ? -2.0 : 2.0) * num / a0;
+        c.b2 = c.b0;
+        c.a1 = (-2.0 * cosW) / a0;
+        c.a2 = (1.0 - alpha) / a0;
+        return c;
+    };
+
+    for (int band = 0; band < bands; ++band)
+    {
+        const double lowerEdge = loHz * std::pow(bandRatio, band);
+        const double upperEdge = lowerEdge * bandRatio;
+        const double centre = std::sqrt(lowerEdge * upperEdge);
+        // Above the available Nyquist range do not pretend to solo a lower
+        // frequency: silence is the truthful result for an inaudible band.
+        bandAudible[(size_t) band] = centre < top && lowerEdge < top;
+        const double lower = juce::jlimit(5.0, maxLower, lowerEdge);
+        const double upper = juce::jlimit(lower + 1.0, top, upperEdge);
+        auto& stages = soloCoefficients[(size_t) band];
+        for (int stage = 0; stage < 3; ++stage)
+        {
+            stages[(size_t) stage] = makeBiquad(lower, butterworthQ[(size_t) stage], true);
+            stages[(size_t) stage + 3] = makeBiquad(upper, butterworthQ[(size_t) stage], false);
+        }
+    }
+}
+
+void LSpectrumProcessor::resetSoloBank(int bank) noexcept
+{
+    for (auto& channel : soloStates[(size_t) bank])
+        for (auto& section : channel) section = {};
+}
+
+double LSpectrumProcessor::processSoloBand(int bank, int channel, int band, double x) noexcept
+{
+    if (band < 0 || band >= bands || !bandAudible[(size_t) band]) return 0.0;
+    const auto& coeffs = soloCoefficients[(size_t) band];
+    auto& states = soloStates[(size_t) bank][(size_t) channel];
+    for (int stage = 0; stage < soloStages; ++stage)
+        x = states[(size_t) stage].process(x, coeffs[(size_t) stage]);
+    return x;
+}
+
 void LSpectrumProcessor::prepareToPlay(double sr, int maxBlockSize)
 {
+    juce::ignoreUnused(maxBlockSize);
     sampleRateHz.store(sr > 0 ? sr : 44100.0);
     cancelScan();
-    juce::dsp::ProcessSpec spec {sampleRateHz.load(), (juce::uint32)juce::jmax(1,maxBlockSize), 1};
-    soloL.prepare(spec); soloR.prepare(spec);
-    soloL.setType(juce::dsp::StateVariableTPTFilterType::bandpass);
-    soloR.setType(juce::dsp::StateVariableTPTFilterType::bandpass);
-    soloL.setResonance(4.f); soloR.setResonance(4.f);
-    soloL.reset(); soloR.reset(); lastSoloCutoff=0.f; soloMix=0.f;
+    prepareSoloFilters(sampleRateHz.load());
+    resetSoloBank(0);
+    resetSoloBank(1);
+    activeSoloBank = 0;
+    activeSoloBand = -1;
+    fadingSoloBand = -1;
+    soloBandBlend = 1.f;
+    lastSoloFrequency = -1.f;
+    lastSoloEnabled = false;
+    soloMix = 0.f;
 }
 void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
 {
@@ -63,14 +130,39 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     const float nDb = noiseDb.load();
     const float nGain = nDb <= -120.f ? 0.f : std::pow(10.f, nDb / 20.f);
     const double rate = juce::jmax(1.0, sampleRateHz.load());
-    const bool solo = soloEnabled.load();
-    const float cutoff = juce::jlimit(20.f, (float) juce::jmax(30.0, rate * .4), soloFrequency.load());
-    if (std::abs(cutoff - lastSoloCutoff) > .01f)
+    const bool solo = soloEnabled.load(std::memory_order_relaxed);
+    const float requestedFrequency = soloFrequency.load(std::memory_order_relaxed);
+    // Only recompute the band on a changed GUI selection. Filter coefficient
+    // generation is NOT performed here: just switch precomputed band tables.
+    if (requestedFrequency != lastSoloFrequency)
     {
-        soloL.setCutoffFrequency(cutoff); soloR.setCutoffFrequency(cutoff);
-        lastSoloCutoff = cutoff;
+        lastSoloFrequency = requestedFrequency;
+        int best = 0;
+        double closest = std::abs(frequency(0) - requestedFrequency);
+        for (int b = 1; b < bands; ++b)
+        {
+            const double distance = std::abs(frequency(b) - requestedFrequency);
+            if (distance < closest) { closest = distance; best = b; }
+        }
+        if (best != activeSoloBand)
+        {
+            fadingSoloBand = activeSoloBand;
+            activeSoloBank = 1 - activeSoloBank;
+            activeSoloBand = best;
+            resetSoloBank(activeSoloBank);
+            soloBandBlend = (fadingSoloBand < 0 ? 1.f : 0.f);
+        }
     }
-    const float soloStep = (float) (1.0 / (.005 * rate));
+    if (solo && !lastSoloEnabled)
+    {
+        // No previous stale filter history when enabling solo.
+        resetSoloBank(activeSoloBank);
+        fadingSoloBand = -1;
+        soloBandBlend = 1.f;
+    }
+    lastSoloEnabled = solo;
+    const float soloStep = (float) (1.0 / (.010 * rate));
+    const float bandStep = (float) (1.0 / (.025 * rate));
     bool wrote = false;
     bool overflow = false;
     // A fresh audio callback acknowledges the request at a buffer boundary.
@@ -84,6 +176,8 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
         const float inL = left[i], inR = right[i];
         const float referenceL = nGain > 0.f ? noiseL.next() * nGain : 0.f;
         const float referenceR = nGain > 0.f ? noiseR.next() * nGain : 0.f;
+        const float auditionL = inL + referenceL;
+        const float auditionR = inR + referenceR;
 
         // The audio thread only writes to the FIFO. FFT never runs here.
         // Keep the unprocessed incoming stereo signal, plus enabled reference noise.
@@ -92,8 +186,8 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
             if (w - r < ringSize - 1)
             {
                 const auto at = (size_t) ((w & (ringSize - 1)) * 2);
-                ring[at] = inL + referenceL;
-                ring[at + 1] = inR + referenceR;
+                ring[at] = auditionL;
+                ring[at + 1] = auditionR;
                 ++w; ++captured; wrote = true;
             }
             else overflow = true;
@@ -102,14 +196,27 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
         // The listening features modify output only when deliberately enabled.
         if (solo) soloMix = juce::jmin(1.f, soloMix + soloStep);
         else      soloMix = juce::jmax(0.f, soloMix - soloStep);
-        if (soloMix > 0.f)
+        if (soloMix > 0.f && activeSoloBand >= 0)
         {
-            const float bandL = soloL.processSample(0, inL);
-            const float bandR = soloR.processSample(0, inR);
-            left[i]  = inL + (bandL - inL) * soloMix;
-            right[i] = inR + (bandR - inR) * soloMix;
+            double bandL = processSoloBand(activeSoloBank, 0, activeSoloBand, auditionL);
+            double bandR = processSoloBand(activeSoloBank, 1, activeSoloBand, auditionR);
+            if (soloBandBlend < 1.f && fadingSoloBand >= 0)
+            {
+                const int oldBank = 1 - activeSoloBank;
+                const double oldL = processSoloBand(oldBank, 0, fadingSoloBand, auditionL);
+                const double oldR = processSoloBand(oldBank, 1, fadingSoloBand, auditionR);
+                bandL = oldL + (bandL - oldL) * soloBandBlend;
+                bandR = oldR + (bandR - oldR) * soloBandBlend;
+                soloBandBlend = juce::jmin(1.f, soloBandBlend + bandStep);
+            }
+            left[i]  = auditionL + (static_cast<float>(bandL) - auditionL) * soloMix;
+            right[i] = auditionR + (static_cast<float>(bandR) - auditionR) * soloMix;
         }
-        if (nGain > 0.f) { left[i] += referenceL; right[i] += referenceR; }
+        else
+        {
+            left[i] = auditionL;
+            right[i] = auditionR;
+        }
     }
 
     if (capturingAtBlockStart)
