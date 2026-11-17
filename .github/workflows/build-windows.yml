@@ -1,0 +1,23 @@
+name: Build LSpectrum VST3 Windows
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-8.0.15-${{ runner.os }}
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LSpectrum-4.5dB-Analyzer-VST3-TEST1
+          path: build/LSpectrum_artefacts/Release/VST3/*.vst3
