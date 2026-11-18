@@ -71,3 +71,16 @@ The `LICENSE` file contains the complete GNU Affero General Public License v3.
 Source code for the VST3 is available in this repository. JUCE 8.0.15 is
 included as a fetched build dependency and licensed under its AGPLv3 option.
 Read [COPYRIGHT.md](COPYRIGHT.md) for attribution and third-party licensing.
+
+
+### CPU idle: dry pass-through (pre-release optimization)
+
+When there is no scan, the bandpass is off and its 10 ms release has finished,
+ and the noise is at -120 dB, the audio callback **returns without modifying
+ the incoming stereo buffer**. No per-sample loop, FFT, ring buffer, noise
+ generator or bandpass is run. The analysis worker uses C++20 atomic wait/notify
+ instead of a 15 ms polling loop: it sleeps until an actual scan event or audio
+ input arrives. The editor continues to function normally. During a brief
+ solo fade-out the DSP remains active to finish the transition safely.
+ The measured REAPER CPU cost still includes host/plugin call overhead, so a
+ specific displayed CPU value cannot be guaranteed.

@@ -3,6 +3,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include "SpectralMean.h"
+#include "IdleGate.h"
 #include <cmath>
 #include <algorithm>
 
@@ -33,7 +34,7 @@ LSpectrumProcessor::LSpectrumProcessor()
 }
 LSpectrumProcessor::~LSpectrumProcessor()
 {
-    quit.store(true); wake.notify_all();
+    quit.store(true, std::memory_order_release); notifyWorker();
     if (worker.joinable()) worker.join();
 }
 bool LSpectrumProcessor::isBusesLayoutSupported(const BusesLayout& layout) const
@@ -125,8 +126,29 @@ void LSpectrumProcessor::prepareToPlay(double sr, int maxBlockSize)
 }
 void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer&)
 {
-    juce::ScopedNoDenormals noDenormals;
     if (audio.getNumChannels() < 2) return;
+
+    // REAPER delivers the input in-place. In the common resting state, simply
+    // leave that buffer untouched: this is a genuine dry, bit-identical pass.
+    // A pending R request must still be acknowledged by the audio callback,
+    // even if this particular buffer can take the dry fast path.
+    int scanStateNow = scanState.load(std::memory_order_acquire);
+    if (scanStateNow == 1)
+    {
+        int requested = 1;
+        if (scanState.compare_exchange_strong(requested, 5, std::memory_order_acq_rel))
+            notifyWorker();
+        scanStateNow = scanState.load(std::memory_order_acquire);
+    }
+
+    const bool capturingAtBlockStart = (scanStateNow == 2);
+    const bool solo = soloEnabled.load(std::memory_order_relaxed);
+    const float nDb = noiseDb.load(std::memory_order_relaxed);
+    if (lspectrum::canPassThroughUntouched(capturingAtBlockStart, solo, soloMix, nDb))
+        return;
+
+    // Only active analysis/listening enters the DSP section below.
+    juce::ScopedNoDenormals noDenormals;
     const int n = audio.getNumSamples();
     float* const left = audio.getWritePointer(0);
     float* const right = audio.getWritePointer(1);
@@ -134,10 +156,8 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     auto captured = scanSamples.load(std::memory_order_relaxed);
     auto w = writeIndex.load(std::memory_order_relaxed);
     const auto r = readIndex.load(std::memory_order_acquire);
-    const float nDb = noiseDb.load();
     const float nGain = nDb <= -120.f ? 0.f : std::pow(10.f, nDb / 20.f);
     const double rate = juce::jmax(1.0, sampleRateHz.load());
-    const bool solo = soloEnabled.load(std::memory_order_relaxed);
     const float gainDb = soloGainDb.load(std::memory_order_relaxed);
     const float gainTarget = gainDb <= soloGainMinimumDb ? 0.f : std::pow(10.f, gainDb / 20.f);
     soloGainSmoother.setTargetValue(gainTarget); // No allocations or locks on audio thread.
@@ -175,12 +195,7 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
     const float bandStep = (float) (1.0 / (.025 * rate));
     bool wrote = false;
     bool overflow = false;
-    // A fresh audio callback acknowledges the request at a buffer boundary.
-    // This prevents the worker from resetting FIFO pointers while an old block
-    // is still writing, even if R is pressed repeatedly.
-    int requested = 1;
-    scanState.compare_exchange_strong(requested, 5, std::memory_order_acq_rel);
-    const bool capturingAtBlockStart = (scanState.load(std::memory_order_acquire) == 2);
+    // R has already been acknowledged above, before the dry fast path.
     for (int i = 0; i < n; ++i)
     {
         const float inL = left[i], inR = right[i];
@@ -246,7 +261,7 @@ void LSpectrumProcessor::processBlock(juce::AudioBuffer<float>& audio, juce::Mid
             scanState.compare_exchange_strong(expected, overflow ? 4 : 3,
                                               std::memory_order_acq_rel);
         }
-        if (wrote || overflow) wake.notify_one();
+        if (wrote || overflow) notifyWorker();
     }
 }
 
@@ -259,13 +274,13 @@ void LSpectrumProcessor::startScan()
     signalDetected.store(false);
     for (auto& channel : channelSignalDetected) channel.store(false);
     scanState.store(1, std::memory_order_release);
-    wake.notify_one();
+    notifyWorker();
 }
 void LSpectrumProcessor::cancelScan()
 {
     std::lock_guard<std::mutex> lock(requestMutex);
     scanState.store(0, std::memory_order_release);
-    wake.notify_one();
+    notifyWorker();
 }
 int LSpectrumProcessor::getRemainingSeconds() const
 {
@@ -376,6 +391,9 @@ void LSpectrumProcessor::workerLoop()
     };
     for (;;)
     {
+        // Capture the generation BEFORE inspecting state/data; any notification
+        // arriving during the work prevents the sleep below (no lost wakeups).
+        const auto wakeGeneration = workerWakeGeneration.load(std::memory_order_acquire);
         if (quit.load(std::memory_order_acquire)) return;
         const int state = scanState.load(std::memory_order_acquire);
         if (state == 5)
@@ -463,8 +481,10 @@ void LSpectrumProcessor::workerLoop()
                 }
             }
         }
-        std::unique_lock<std::mutex> lock(wakeMutex);
-        wake.wait_for(lock, std::chrono::milliseconds(15));
+        // With no pending events this blocks indefinitely in the OS.
+        // New scan requests, audio FIFO writes, cancellation and shutdown
+        // all signal a fresh generation and wake this thread immediately.
+        workerWakeGeneration.wait(wakeGeneration, std::memory_order_acquire);
     }
 }
 juce::File LSpectrumProcessor::dataDirectory() const

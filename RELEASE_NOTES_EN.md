@@ -12,6 +12,8 @@ First public release of the standalone C++/JUCE stereo VST3 for REAPER.
 - Noise reference, selected-band view, clipboard and saved report.
 - NVDA-oriented editor, cyclic countdown OK/Cancel, accessible Alt+A About.
 - Per-project settings/results; global configuration under Roaming/Lo-lo.
+- Idle CPU optimization: with no scan, noise at −120 dB and audition off,
+  incoming stereo audio is untouched and the FFT worker sleeps until needed.
 - Open source under GNU AGPLv3; Italian and English manuals included.
 
 Compatibility: Windows x64 VST3, designed for REAPER and NVDA.

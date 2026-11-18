@@ -18,6 +18,8 @@ Features:
   adjustable audition gain (0 dB default, no added makeup gain).
 - 1–600-second analysis countdown, reference noise, selected bands and reports.
 - NVDA/keyboard accessibility, cyclic countdown OK/Cancel, on-demand About.
+- CPU-efficient idle: bit-identical stereo pass-through with no analysis,
+  noise or bandpass; FFT worker sleeps until required.
 - English and Italian user guides, source code and AGPLv3 license.
 
 Windows x64 VST3. Source: https://github.com/Lo-lo78/LSpectrum

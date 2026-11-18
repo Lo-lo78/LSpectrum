@@ -5,9 +5,7 @@
 #include <array>
 #include <atomic>
 #include <thread>
-#include <condition_variable>
 #include <mutex>
-#include <chrono>
 #include <cstdint>
 
 class LSpectrumProcessor final : public juce::AudioProcessor
@@ -103,6 +101,13 @@ public:
 
 private:
     void workerLoop();
+    void notifyWorker() noexcept
+    {
+        // C++20 atomic wait/notify: no periodic polling and no mutex on
+        // the real-time audio callback. Each wake has a new generation.
+        workerWakeGeneration.fetch_add(1u, std::memory_order_release);
+        workerWakeGeneration.notify_one();
+    }
     bool analyzeFrame(const std::array<float, fftSize>& frame, double sampleRate,
                       std::array<double, bands>& deviations);
     struct NoiseState
@@ -165,8 +170,7 @@ private:
     void resetSoloBank(int bank) noexcept;
     double processSoloBand(int bank, int channel, int band, double x) noexcept;
     std::thread worker;
-    std::condition_variable wake;
-    std::mutex wakeMutex;
+    std::atomic<uint32_t> workerWakeGeneration {0};
     std::mutex requestMutex; // GUI/state requests only; never acquired by audio callback
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(LSpectrumProcessor)
 };

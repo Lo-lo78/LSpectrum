@@ -10,7 +10,7 @@ FetchContent_Declare(JUCE GIT_REPOSITORY https://github.com/juce-framework/JUCE.
 FetchContent_MakeAvailable(JUCE)
 juce_add_plugin(LSpectrum COMPANY_NAME "Lo-lo" BUNDLE_ID "org.lolo.lspectrum" PLUGIN_MANUFACTURER_CODE LoLo PLUGIN_CODE Ls45 VERSION 0.99.1 FORMATS VST3 PRODUCT_NAME "LSpectrum 4.5dB Analyzer" DESCRIPTION "Accessible 32 band spectrum analyzer" IS_SYNTH FALSE NEEDS_MIDI_INPUT FALSE NEEDS_MIDI_OUTPUT FALSE IS_MIDI_EFFECT FALSE EDITOR_WANTS_KEYBOARD_FOCUS TRUE COPY_PLUGIN_AFTER_BUILD FALSE)
 juce_generate_juce_header(LSpectrum)
-target_sources(LSpectrum PRIVATE Source/PluginProcessor.h Source/PluginProcessor.cpp Source/SpectralMean.h Source/PluginEditor.h Source/PluginEditor.cpp Source/ScreenReaderAnnouncer.h Source/ScreenReaderAnnouncer.cpp)
+target_sources(LSpectrum PRIVATE Source/PluginProcessor.h Source/PluginProcessor.cpp Source/SpectralMean.h Source/IdleGate.h Source/PluginEditor.h Source/PluginEditor.cpp Source/ScreenReaderAnnouncer.h Source/ScreenReaderAnnouncer.cpp)
 target_compile_features(LSpectrum PRIVATE cxx_std_20)
 target_compile_definitions(LSpectrum PUBLIC JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0)
 target_link_libraries(LSpectrum PRIVATE juce::juce_audio_utils juce::juce_dsp juce::juce_recommended_config_flags juce::juce_recommended_lto_flags juce::juce_recommended_warning_flags)
@@ -23,3 +23,8 @@ enable_testing()
 add_executable(LSpectrumMeanTest tests/test_spectral_mean.cpp)
 target_compile_features(LSpectrumMeanTest PRIVATE cxx_std_20)
 add_test(NAME LSpectrumSilentFrames COMMAND LSpectrumMeanTest)
+
+# The no-DSP passthrough predicate can be verified without JUCE or an audio host.
+add_executable(LSpectrumIdleGateTest tests/test_idle_gate.cpp)
+target_compile_features(LSpectrumIdleGateTest PRIVATE cxx_std_20)
+add_test(NAME LSpectrumIdleGate COMMAND LSpectrumIdleGateTest)

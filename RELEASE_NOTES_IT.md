@@ -12,6 +12,8 @@ Prima release pubblica del nuovo analizzatore VST3 in C++/JUCE per REAPER.
 - Generatore di rumore di riferimento, selezione delle bande e copia/esportazione.
 - Interfaccia accessibile NVDA, countdown ciclico con OK/Cancel, Alt+A About.
 - Persistenza nel progetto REAPER e preferenze in AppData/Roaming/Lo-lo.
+- Bypass DSP in idle: senza scansione, noise a −120 dB e passabanda spento,
+  l’audio stereo passa senza essere elaborato. Il thread FFT dorme finché non serve.
 - Codice aperto sotto GNU AGPLv3, guide italiane e inglesi incluse.
 
 Compatibilità: VST3 Windows x64; pensato per REAPER e NVDA.
